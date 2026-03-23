@@ -10,8 +10,10 @@
 #include <memory>
 #include <mutex>
 #include <iostream>
+#include <atomic>
 #include <string>
 #include <thread>
+#include <condition_variable>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -159,9 +161,11 @@ class FreenectV1Device final : public KinectDevice {
   }
 
   bool start() override {
-    if (dev_ == nullptr || running_) {
+    if (dev_ == nullptr || running_.load()) {
       return dev_ != nullptr;
     }
+
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
 
     const freenect_frame_mode depth_mode =
         freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_DEPTH_MM);
@@ -193,7 +197,9 @@ class FreenectV1Device final : public KinectDevice {
       video_started_ = true;
     }
 
-    running_ = true;
+    running_.store(true);
+    stop_event_thread_.store(false);
+    event_thread_ = std::thread([this] { EventLoop(); });
 
     if (audio_enabled_) {
       setAudioEnabled(true);
@@ -206,10 +212,16 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return false;
     }
-    if (!running_) {
+    if (!running_.load()) {
       return true;
     }
 
+    stop_event_thread_.store(true);
+    if (event_thread_.joinable()) {
+      event_thread_.join();
+    }
+
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     if (audio_started_) {
       freenect_stop_audio(dev_);
       audio_started_ = false;
@@ -222,24 +234,18 @@ class FreenectV1Device final : public KinectDevice {
       freenect_stop_depth(dev_);
       depth_started_ = false;
     }
-    running_ = false;
+    running_.store(false);
     return true;
   }
 
   bool update() override {
-    if (!running_) {
+    if (!running_.load()) {
       return false;
     }
 
     if (requested_stream_ != active_stream_) {
+      std::lock_guard<std::mutex> device_lock(device_mutex_);
       ApplyVideoMode();
-    }
-
-    timeval timeout{};
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 2000;
-    if (freenect_process_events_timeout(ctx_, &timeout) < 0) {
-      return false;
     }
 
     std::lock_guard<std::mutex> lock(frame_mutex_);
@@ -261,6 +267,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     const int clamped = std::max(-30, std::min(30, angle));
     freenect_set_tilt_degs(dev_, clamped);
   }
@@ -269,6 +276,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     const int clamped = std::max(0, std::min(6, mode));
     freenect_set_led(dev_, static_cast<freenect_led_options>(clamped));
   }
@@ -285,6 +293,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     const freenect_flag_value value = enabled ? FREENECT_ON : FREENECT_OFF;
     freenect_set_flag(dev_, FREENECT_MIRROR_DEPTH, value);
     freenect_set_flag(dev_, FREENECT_MIRROR_VIDEO, value);
@@ -294,6 +303,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     const freenect_flag_value value = enabled ? FREENECT_ON : FREENECT_OFF;
     freenect_set_flag(dev_, FREENECT_AUTO_EXPOSURE, value);
     freenect_set_flag(dev_, FREENECT_AUTO_FLICKER, value);
@@ -303,6 +313,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     freenect_set_flag(dev_, FREENECT_AUTO_WHITE_BALANCE, enabled ? FREENECT_ON : FREENECT_OFF);
   }
 
@@ -310,6 +321,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     freenect_set_flag(dev_, FREENECT_NEAR_MODE, enabled ? FREENECT_ON : FREENECT_OFF);
   }
 
@@ -317,6 +329,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     const int clamped = std::max(1000, std::min(200000, value));
     freenect_set_exposure(dev_, clamped);
   }
@@ -325,6 +338,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr) {
       return;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     const int clamped = std::max(1, std::min(50, value));
     freenect_set_ir_brightness(dev_, static_cast<uint16_t>(clamped));
   }
@@ -338,6 +352,7 @@ class FreenectV1Device final : public KinectDevice {
     if (dev_ == nullptr || !running_) {
       return false;
     }
+    std::lock_guard<std::mutex> device_lock(device_mutex_);
     if (enabled) {
       if (!audio_started_ && freenect_start_audio(dev_) == 0) {
         audio_started_ = true;
@@ -357,12 +372,23 @@ class FreenectV1Device final : public KinectDevice {
     return audio_level_;
   }
 
+  std::string audioDebugSummary() const override {
+    return "callbacks=" + std::to_string(audio_callback_count_.load()) +
+           ", nonzeroCallbacks=" + std::to_string(audio_nonzero_count_.load()) +
+           ", cancelledRms=" + std::to_string(last_cancelled_rms_.load()) +
+           ", rawRms=" + std::to_string(last_raw_rms_.load()) +
+           ", level=" + std::to_string(audio_level_.load());
+  }
+
   bool supportsMotor() const override {
-    return true;
+    // On current macOS/libusb setups the Kinect v1 motor control path can
+    // expose a null control handle and crash inside freenect_set_tilt_degs().
+    // Keep motor controls disabled until the subdevice path is made reliable.
+    return false;
   }
 
   bool supportsLed() const override {
-    return true;
+    return false;
   }
 
   bool supportsAudioInput() const override {
@@ -374,6 +400,25 @@ class FreenectV1Device final : public KinectDevice {
   }
 
  private:
+  void EventLoop() {
+    while (!stop_event_thread_.load()) {
+      timeval timeout{};
+      timeout.tv_sec = 0;
+      timeout.tv_usec = 16000;
+      int rc = 0;
+      {
+        std::lock_guard<std::mutex> device_lock(device_mutex_);
+        if (ctx_ == nullptr || dev_ == nullptr) {
+          break;
+        }
+        rc = freenect_process_events_timeout(ctx_, &timeout);
+      }
+      if (rc < 0) {
+        break;
+      }
+    }
+  }
+
   bool ApplyVideoMode() {
     if (dev_ == nullptr) {
       return false;
@@ -446,25 +491,71 @@ class FreenectV1Device final : public KinectDevice {
   static void OnAudioFrame(
       freenect_device *dev,
       int num_samples,
-      int32_t *,
-      int32_t *,
-      int32_t *,
-      int32_t *,
+      int32_t *mic1,
+      int32_t *mic2,
+      int32_t *mic3,
+      int32_t *mic4,
       int16_t *cancelled,
       void *) {
     auto *self = static_cast<FreenectV1Device *>(freenect_get_user(dev));
-    if (self == nullptr || cancelled == nullptr || num_samples <= 0) {
+    if (self == nullptr || num_samples <= 0) {
       return;
     }
 
-    double energy = 0.0;
-    for (int i = 0; i < num_samples; ++i) {
-      const double sample = static_cast<double>(cancelled[i]);
-      energy += sample * sample;
+    double cancelled_energy = 0.0;
+    bool cancelled_has_signal = false;
+    if (cancelled != nullptr) {
+      for (int i = 0; i < num_samples; ++i) {
+        const double sample = static_cast<double>(cancelled[i]) / 32768.0;
+        cancelled_energy += sample * sample;
+        if (!cancelled_has_signal && std::abs(cancelled[i]) > 4) {
+          cancelled_has_signal = true;
+        }
+      }
+      cancelled_energy /= static_cast<double>(num_samples);
     }
-    energy /= static_cast<double>(num_samples);
-    const double rms = std::sqrt(energy) / 32768.0;
-    self->audio_level_ = static_cast<float>(rms);
+
+    double raw_energy = 0.0;
+    bool raw_has_signal = false;
+    if (mic1 != nullptr && mic2 != nullptr && mic3 != nullptr && mic4 != nullptr) {
+      for (int i = 0; i < num_samples; ++i) {
+        const double mixed = (static_cast<double>(mic1[i]) + static_cast<double>(mic2[i]) +
+                              static_cast<double>(mic3[i]) + static_cast<double>(mic4[i])) /
+                             (4.0 * 2147483648.0);
+        raw_energy += mixed * mixed;
+        if (!raw_has_signal &&
+            (std::abs(mic1[i]) > 2048 || std::abs(mic2[i]) > 2048 || std::abs(mic3[i]) > 2048 || std::abs(mic4[i]) > 2048)) {
+          raw_has_signal = true;
+        }
+      }
+      raw_energy /= static_cast<double>(num_samples);
+    }
+
+    if (cancelled == nullptr && (mic1 == nullptr || mic2 == nullptr || mic3 == nullptr || mic4 == nullptr)) {
+      self->audio_level_ = 0.0f;
+      return;
+    }
+
+    const double cancelled_rms = std::sqrt(cancelled_energy);
+    const double raw_rms = std::sqrt(raw_energy);
+    // Prefer the stronger live path. The processed/cancelled stream can stay
+    // nearly flat even while the raw array clearly contains speech, so simply
+    // preferring "cancelled if nonzero" hides real microphone activity.
+    const double selected_rms =
+        (cancelled_has_signal || raw_has_signal) ? std::max(cancelled_rms, raw_rms) : std::max(cancelled_rms, raw_rms);
+    // Kinect v1 microphone samples are quiet in normalized float space. Scale
+    // the UI meter so normal speech is visible without affecting the raw audio
+    // data used by the HAL/system publish path.
+    constexpr double kUiMeterGain = 48.0;
+    const double display_level = std::min(1.0, selected_rms * kUiMeterGain);
+
+    self->audio_callback_count_.fetch_add(1, std::memory_order_relaxed);
+    if (selected_rms > 0.0005) {
+      self->audio_nonzero_count_.fetch_add(1, std::memory_order_relaxed);
+    }
+    self->last_cancelled_rms_.store(static_cast<float>(cancelled_rms), std::memory_order_relaxed);
+    self->last_raw_rms_.store(static_cast<float>(raw_rms), std::memory_order_relaxed);
+    self->audio_level_.store(static_cast<float>(display_level), std::memory_order_relaxed);
   }
 
   freenect_context *ctx_ = nullptr;
@@ -473,7 +564,8 @@ class FreenectV1Device final : public KinectDevice {
   std::string serial_;
   bool audio_supported_ = false;
 
-  bool running_ = false;
+  std::atomic<bool> running_{false};
+  std::atomic<bool> stop_event_thread_{false};
   bool depth_started_ = false;
   bool video_started_ = false;
   bool audio_started_ = false;
@@ -482,10 +574,16 @@ class FreenectV1Device final : public KinectDevice {
   StreamKind requested_stream_ = StreamKind::kRgb;
   StreamKind active_stream_ = StreamKind::kRgb;
 
+  std::mutex device_mutex_;
   mutable std::mutex frame_mutex_;
   FrameData frame_;
   bool has_new_frame_ = false;
-  float audio_level_ = 0.0f;
+  std::thread event_thread_;
+  std::atomic<float> audio_level_ = 0.0f;
+  std::atomic<float> last_cancelled_rms_ = 0.0f;
+  std::atomic<float> last_raw_rms_ = 0.0f;
+  std::atomic<std::uint64_t> audio_callback_count_ = 0;
+  std::atomic<std::uint64_t> audio_nonzero_count_ = 0;
 };
 
 class FreenectV1Backend final : public KinectBackend {

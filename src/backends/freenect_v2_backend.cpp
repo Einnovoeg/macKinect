@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -74,8 +75,14 @@ class FreenectV2Device final : public KinectDevice {
     }
 
     libfreenect2::FrameMap frames;
-    if (!listener_.waitForNewFrame(frames, 1)) {
+    if (!listener_.waitForNewFrame(frames, 0)) {
       return false;
+    }
+
+    StreamKind selected_stream = StreamKind::kRgb;
+    {
+      std::lock_guard<std::mutex> lock(frame_mutex_);
+      selected_stream = selected_stream_;
     }
 
     std::vector<std::uint8_t> rgb_data;
@@ -98,9 +105,10 @@ class FreenectV2Device final : public KinectDevice {
       rgb_ts = color->timestamp;
 
       // libfreenect2 color frame is typically BGRA. Convert to RGB for UI.
-      rgb_data.resize(static_cast<std::size_t>(color->width) * color->height * 3);
+      const std::size_t pixel_count = static_cast<std::size_t>(color->width) * static_cast<std::size_t>(color->height);
+      rgb_data.resize(pixel_count * 3);
       const std::uint8_t *src = color->data;
-      for (int i = 0; i < color->width * color->height; ++i) {
+      for (std::size_t i = 0; i < pixel_count; ++i) {
         rgb_data[i * 3 + 0] = src[i * 4 + 2];
         rgb_data[i * 3 + 1] = src[i * 4 + 1];
         rgb_data[i * 3 + 2] = src[i * 4 + 0];
@@ -112,9 +120,10 @@ class FreenectV2Device final : public KinectDevice {
       depth_w = depth->width;
       depth_h = depth->height;
       depth_ts = depth->timestamp;
-      depth_data.resize(static_cast<std::size_t>(depth->width) * depth->height);
+      const std::size_t pixel_count = static_cast<std::size_t>(depth->width) * static_cast<std::size_t>(depth->height);
+      depth_data.resize(pixel_count);
       const float *src = reinterpret_cast<const float *>(depth->data);
-      for (int i = 0; i < depth->width * depth->height; ++i) {
+      for (std::size_t i = 0; i < pixel_count; ++i) {
         const float mm = src[i];
         depth_data[i] = static_cast<std::uint16_t>(std::max(0.0f, std::min(65535.0f, mm)));
       }
@@ -125,9 +134,10 @@ class FreenectV2Device final : public KinectDevice {
       ir_w = ir->width;
       ir_h = ir->height;
       ir_ts = ir->timestamp;
-      ir_data.resize(static_cast<std::size_t>(ir->width) * ir->height);
+      const std::size_t pixel_count = static_cast<std::size_t>(ir->width) * static_cast<std::size_t>(ir->height);
+      ir_data.resize(pixel_count);
       const float *src = reinterpret_cast<const float *>(ir->data);
-      for (int i = 0; i < ir->width * ir->height; ++i) {
+      for (std::size_t i = 0; i < pixel_count; ++i) {
         const float v = src[i] / 65535.0f;
         ir_data[i] = static_cast<std::uint8_t>(std::max(0.0f, std::min(255.0f, v * 255.0f)));
       }
@@ -166,11 +176,11 @@ class FreenectV2Device final : public KinectDevice {
     };
 
     bool assigned = false;
-    if (selected_stream_ == StreamKind::kRgb) {
+    if (selected_stream == StreamKind::kRgb) {
       assigned = assign_rgb();
-    } else if (selected_stream_ == StreamKind::kIr) {
+    } else if (selected_stream == StreamKind::kIr) {
       assigned = assign_ir();
-    } else if (selected_stream_ == StreamKind::kDepth) {
+    } else if (selected_stream == StreamKind::kDepth) {
       assigned = assign_depth();
     }
     if (!assigned) {
@@ -178,6 +188,7 @@ class FreenectV2Device final : public KinectDevice {
     }
 
     if (assigned) {
+      std::lock_guard<std::mutex> lock(frame_mutex_);
       frame_ = std::move(next_frame);
       has_new_frame_ = true;
     }
@@ -187,6 +198,7 @@ class FreenectV2Device final : public KinectDevice {
   }
 
   bool getFrame(FrameData &out_frame) override {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
     if (!has_new_frame_) {
       return false;
     }
@@ -204,10 +216,12 @@ class FreenectV2Device final : public KinectDevice {
   }
 
   void setStreamKind(StreamKind kind) override {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
     selected_stream_ = kind;
   }
 
   StreamKind streamKind() const override {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
     return selected_stream_;
   }
 
@@ -220,6 +234,7 @@ class FreenectV2Device final : public KinectDevice {
   libfreenect2::Freenect2Device *dev_ = nullptr;
   libfreenect2::SyncMultiFrameListener listener_;
 
+  mutable std::mutex frame_mutex_;
   FrameData frame_;
   bool has_new_frame_ = false;
   bool running_ = false;

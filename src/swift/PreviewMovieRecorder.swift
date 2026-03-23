@@ -3,17 +3,23 @@ import AVFoundation
 import CoreGraphics
 import CoreVideo
 
+/// Records the currently displayed preview stream to a lightweight H.264 MOV.
+/// The recorder accepts already-rendered CGImages so the GUI, still capture,
+/// and video capture paths all share the same preview pipeline.
 final class PreviewMovieRecorder {
     let outputURL: URL
 
     private let width: Int
     private let height: Int
-    private let fps: Int32 = 30
+    private let writerTimeScale: Int32 = 600
+    private let minFrameStep = CMTime(value: 1, timescale: 240)
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
     private var frameIndex: Int64 = 0
     private var started = false
+    private var recordingStartDate: Date?
+    private var lastPresentationTime = CMTime.invalid
 
     init(outputURL: URL, width: Int, height: Int, qualityPreset: VideoQualityPreset) throws {
         self.outputURL = outputURL
@@ -29,7 +35,7 @@ final class PreviewMovieRecorder {
         let compression: [String: Any] = [
             AVVideoAverageBitRateKey: qualityPreset.averageBitRate(width: self.width, height: self.height),
             AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-            AVVideoMaxKeyFrameIntervalKey: Int(fps)
+            AVVideoMaxKeyFrameIntervalKey: 30
         ]
 
         let settings: [String: Any] = [
@@ -64,6 +70,8 @@ final class PreviewMovieRecorder {
             }
             writer.startSession(atSourceTime: .zero)
             started = true
+            recordingStartDate = Date()
+            lastPresentationTime = .zero
         }
 
         guard input.isReadyForMoreMediaData else {
@@ -73,10 +81,11 @@ final class PreviewMovieRecorder {
             return false
         }
 
-        let time = CMTime(value: frameIndex, timescale: fps)
+        let time = nextPresentationTime()
         let ok = adaptor.append(pixelBuffer, withPresentationTime: time)
         if ok {
             frameIndex += 1
+            lastPresentationTime = time
         }
         return ok
     }
@@ -99,6 +108,27 @@ final class PreviewMovieRecorder {
                 completion(nil)
             }
         }
+    }
+
+    private func nextPresentationTime() -> CMTime {
+        guard let recordingStartDate else {
+            return .zero
+        }
+        if frameIndex == 0 {
+            return .zero
+        }
+
+        // Use wall-clock deltas when possible, but guarantee monotonic sample
+        // times so AVAssetWriter never sees duplicate or reversed timestamps.
+        let elapsed = max(0.0, Date().timeIntervalSince(recordingStartDate))
+        var candidate = CMTime(seconds: elapsed, preferredTimescale: writerTimeScale)
+        if !CMTIME_IS_VALID(lastPresentationTime) {
+            return candidate
+        }
+        if CMTimeCompare(candidate, lastPresentationTime) <= 0 {
+            candidate = CMTimeAdd(lastPresentationTime, minFrameStep)
+        }
+        return candidate
     }
 
     private func makePixelBuffer(from image: CGImage) -> CVPixelBuffer? {
@@ -129,6 +159,8 @@ final class PreviewMovieRecorder {
             return nil
         }
 
+        // Clear first so odd-sized source frames that were rounded up to even
+        // encoder dimensions do not leave stale pixels in the padded edge.
         ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
         ctx.interpolationQuality = .none

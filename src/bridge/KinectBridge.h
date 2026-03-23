@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import "OBSSyphonPublisher.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -18,6 +19,9 @@ NS_ASSUME_NONNULL_BEGIN
                   timestamp:(NSTimeInterval)timestamp;
 @end
 
+/// Objective-C bridge that exposes the C++ backend layer to Swift. The bridge
+/// owns the active backend/device pair and returns value-type frame snapshots
+/// so the Swift UI does not depend on C++ buffer lifetimes.
 @interface KinectBridge : NSObject
 
 + (instancetype)sharedInstance;
@@ -34,6 +38,7 @@ NS_ASSUME_NONNULL_BEGIN
 // Open the first available device if serial is nil
 - (BOOL)openDevice:(nullable NSString *)serial;
 
+- (void)closeDevice;
 - (void)startStream;
 - (void)stopStream;
 
@@ -60,6 +65,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)setAudioEnabled:(BOOL)enabled;
 - (BOOL)audioEnabled;
 - (float)audioLevel;
+- (NSString *)audioDebugSummary;
 
 // Status/capabilities
 - (NSDictionary *)deviceCapabilities;

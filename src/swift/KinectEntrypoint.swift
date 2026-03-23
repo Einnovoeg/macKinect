@@ -10,8 +10,12 @@ private enum BackendChoice {
 private struct CliOptions {
     var runGui = true
     var showHelp = false
+    var showVersion = false
     var listDevices = false
     var runPreview = false
+    var showIntegrationStatus = false
+    var installIntegration = false
+    var launchObsVirtualCamera = false
     var previewSeconds = 5
     var backend: BackendChoice = .auto
 }
@@ -28,9 +32,22 @@ Options:
   --gui               Run the graphical interface (default)
   --list              List connected devices
   --preview [sec]     Run a CLI preview for N seconds
+  --version           Print the app version
+  --integration-status  Show system camera/microphone integration status
+  --install-integration Install bundled system integration components
+  --launch-obs-virtualcam Launch OBS with the macKinect Syphon scene and Virtual Camera
   --backend [v1|v2]   Force a specific backend
   --help, -h          Show this help
 """)
+}
+
+private func currentAppVersion() -> String {
+    let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    let bundleVersion = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? shortVersion
+    if bundleVersion == shortVersion {
+        return shortVersion
+    }
+    return "\(shortVersion) (\(bundleVersion))"
 }
 
 private func parsePositiveInt(_ text: String) -> Int? {
@@ -47,13 +64,6 @@ private func parseBackendChoice(_ raw: String) -> BackendChoice? {
     }
 }
 
-private func coerceInt(_ value: Any?) -> Int? {
-    if let v = value as? Int { return v }
-    if let v = value as? NSNumber { return v.intValue }
-    if let v = value as? String { return Int(v) }
-    return nil
-}
-
 private func parseOptions(arguments: [String]) -> CliOptions? {
     var options = CliOptions()
     var i = 0
@@ -68,6 +78,13 @@ private func parseOptions(arguments: [String]) -> CliOptions? {
             continue
         }
 
+        if arg == "--version" {
+            options.showVersion = true
+            options.runGui = false
+            i += 1
+            continue
+        }
+
         if arg == "--gui" {
             options.runGui = true
             i += 1
@@ -76,6 +93,29 @@ private func parseOptions(arguments: [String]) -> CliOptions? {
 
         if arg == "--list" {
             options.listDevices = true
+            options.runGui = false
+            i += 1
+            continue
+        }
+
+        if arg == "--integration-status" {
+            options.showIntegrationStatus = true
+            options.runGui = false
+            i += 1
+            continue
+        }
+
+        if arg == "--install-integration" {
+            options.installIntegration = true
+            options.showIntegrationStatus = true
+            options.runGui = false
+            i += 1
+            continue
+        }
+
+        if arg == "--launch-obs-virtualcam" {
+            options.launchObsVirtualCamera = true
+            options.showIntegrationStatus = true
             options.runGui = false
             i += 1
             continue
@@ -146,7 +186,77 @@ private func generationLabel(_ generation: Int) -> String {
     generation == 2 ? "Kinect v2" : "Kinect v1"
 }
 
+private func printIntegrationStatus(manager: KinectManager) {
+    print("Integration:")
+    print("  publish requested: \(manager.publishToSystem)")
+    print("  camera extension bundled: \(manager.systemCameraExtensionAvailable)")
+    print("  camera extension installed: \(manager.systemCameraExtensionInstalled)")
+    print("  camera extension active: \(manager.systemCameraExtensionActive)")
+    print("  camera DAL installed: \(manager.systemCameraDalInstalled)")
+    print("  audio HAL installed: \(manager.systemAudioHalInstalled)")
+    print("  microphone mode: \(manager.systemMicMode.title)")
+    print("  camera published: \(manager.systemCameraPublished ? manager.systemPublishedCameraName : "no")")
+    print("  microphone published: \(manager.systemMicPublished ? manager.systemPublishedMicName : "no")")
+    print("  obs installed: \(manager.obsInstalled)")
+    print("  obs-kinect plugin installed: \(manager.obsKinectPluginInstalled)")
+    print("  obs virtual camera published: \(manager.obsVirtualCameraPublished ? manager.obsVirtualCameraName : "no")")
+    print("  note: \(manager.systemPublishNote)")
+    print("  obs note: \(manager.obsIntegrationNote)")
+    if !manager.systemIntegrationInstallResult.isEmpty {
+        print("  install result: \(manager.systemIntegrationInstallResult)")
+    }
+}
+
+private func waitFor(timeout seconds: TimeInterval, until condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        if condition() {
+            return true
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+    return condition()
+}
+
 private func runCli(options: CliOptions) -> Int32 {
+    if options.showVersion {
+        print(currentAppVersion())
+        return 0
+    }
+
+    if options.showIntegrationStatus || options.installIntegration {
+        let manager = KinectManager()
+        manager.refreshSystemIntegrationStatus()
+
+        if options.installIntegration {
+            manager.installSystemIntegration()
+            let finished = waitFor(timeout: 600) {
+                !manager.systemIntegrationInstallInProgress
+            }
+            if !finished {
+                eprintln("Timed out waiting for integration install to finish.")
+                return 1
+            }
+            manager.refreshSystemIntegrationStatus()
+        }
+
+        if options.launchObsVirtualCamera {
+            manager.launchOBSVirtualCamera()
+            RunLoop.main.run(until: Date().addingTimeInterval(1.0))
+            manager.refreshSystemIntegrationStatus()
+        }
+
+        printIntegrationStatus(manager: manager)
+
+        if options.installIntegration {
+            let result = manager.systemIntegrationInstallResult.lowercased()
+            if result.contains("failed") || result.contains("canceled") || result.contains("cancelled") {
+                return 1
+            }
+        }
+        return 0
+    }
+
     let bridge = KinectBridge.sharedInstance()
     let allDevices = bridge.discoverDevices()
     let devices = allDevices.filter { entry in

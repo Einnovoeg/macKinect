@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreGraphics
 import AppKit
+import Combine
 
 struct ContentView: View {
     @StateObject private var manager = KinectManager()
@@ -8,9 +9,21 @@ struct ContentView: View {
     @State private var rgbImage: CGImage?
     @State private var irImage: CGImage?
     @State private var depthImage: CGImage?
+    @State private var selectedSidebarSection: SidebarSection = .control
 
-    private let frameTimer = Timer.publish(every: 0.033, on: .main, in: .common).autoconnect()
-    private let supportURL = URL(string: "https://buymeacoffee.com/einnovoeg")!
+    // A lightweight polling timer keeps the SwiftUI preview responsive without
+    // forcing the bridge layer to push frames onto the UI thread.
+    private let frameTimer = Timer.publish(every: 0.033, on: .main, in: .common)
+    @State private var frameTimerConnection: Cancellable?
+
+    private enum SidebarSection: String, CaseIterable, Identifiable {
+        case control = "Control"
+        case capture = "Capture"
+        case hardware = "Hardware"
+        case system = "System"
+
+        var id: String { rawValue }
+    }
 
     var body: some View {
         ZStack {
@@ -27,6 +40,17 @@ struct ContentView: View {
         }
         .tint(Color(red: 0.12, green: 0.79, blue: 0.93))
         .frame(minWidth: 1280, minHeight: 820)
+        .onAppear {
+            manager.performInitialLoadIfNeeded()
+            updateFrameTimerConnection()
+        }
+        .onDisappear {
+            frameTimerConnection?.cancel()
+            frameTimerConnection = nil
+        }
+        .onChange(of: manager.streaming) {
+            updateFrameTimerConnection()
+        }
         .onReceive(frameTimer) { _ in
             guard let frame = manager.pollFrame() else { return }
             rgbImage = frame.rgbData.rgbCGImage(width: frame.width, height: frame.height)
@@ -35,7 +59,19 @@ struct ContentView: View {
 
             if let image = selectedPreviewImage {
                 manager.appendPreviewFrameForRecording(image, streamType: manager.streamType)
+                manager.publishPreviewFrameToOBS(image)
             }
+        }
+    }
+
+    private func updateFrameTimerConnection() {
+        if manager.streaming {
+            if frameTimerConnection == nil {
+                frameTimerConnection = frameTimer.connect()
+            }
+        } else {
+            frameTimerConnection?.cancel()
+            frameTimerConnection = nil
         }
     }
 
@@ -87,6 +123,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(selectedPreviewImage == nil)
+                    .help("Save the currently selected preview stream as a still image.")
 
                     Button {
                         toggleVideoRecordingFromPreview()
@@ -96,6 +133,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled((!manager.isRecordingVideo && selectedPreviewImage == nil) || !manager.streaming)
+                    .help("Start or stop recording the current preview stream to a QuickTime movie.")
                 }
             }
             .padding(14)
@@ -125,7 +163,7 @@ struct ContentView: View {
             }
 
             HStack(spacing: 12) {
-                infoTile(title: "Mic", value: manager.audioEnabled ? (manager.audioStreamActive ? "Active" : "Armed") : "Off")
+                infoTile(title: "Mic", value: manager.unifiedMicrophoneStatus)
                 infoTile(title: "Scanner", value: manager.scannerBusy ? "Capturing" : "Ready")
                 infoTile(title: "DAL", value: manager.systemCameraDalInstalled ? "Installed" : "Missing")
                 infoTile(title: "HAL", value: manager.systemAudioHalInstalled ? "Installed" : "Missing")
@@ -134,25 +172,71 @@ struct ContentView: View {
     }
 
     private var controlsPanel: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                cardSection {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("macKinect")
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
-                            .font(.callout)
-                            .foregroundStyle(.white.opacity(0.75))
-                        Link("Support development", destination: supportURL)
-                            .font(.caption.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            headerSummarySection
+            sidebarSectionPicker
 
-                cardSection(title: "Devices") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Picker("Device", selection: $manager.selectedDeviceID) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    switch selectedSidebarSection {
+                    case .control:
+                        devicesSection
+                    case .capture:
+                        mediaCaptureSection
+                        scannerSection
+                    case .hardware:
+                        cameraMotorSection
+                    case .system:
+                        systemIntegrationSection
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var headerSummarySection: some View {
+        cardSection {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("macKinect")
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                            Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
+                                .font(.callout)
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+
+                        Spacer(minLength: 8)
+
+                        VStack(alignment: .trailing, spacing: 8) {
+                            statusBadge(manager.connected ? "Ready" : "Idle",
+                                        color: manager.connected ? Color(red: 0.12, green: 0.79, blue: 0.93) : .gray)
+                            Text("v\(appVersion)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        quickActionButton("Refresh Devices", systemImage: "arrow.clockwise") {
+                            manager.refreshDevices()
+                        }
+                        quickActionButton("Open Captures", systemImage: "folder") {
+                            revealPath(manager.lastCapturePath.isEmpty ? captureRootPath : manager.lastCapturePath)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Text("Quick Connect")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.62))
+
+                        Picker("Quick Device", selection: $manager.selectedDeviceID) {
                             if manager.devices.isEmpty {
                                 Text("No Kinect detected").tag("")
                             }
@@ -162,246 +246,635 @@ struct ContentView: View {
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
+                        .help("Choose a Kinect and connect without leaving the summary card.")
 
-                        HStack(spacing: 8) {
-                            Button("Refresh") { manager.refreshDevices() }
-                                .buttonStyle(.bordered)
-                            Button("Connect") { manager.connectSelectedDevice() }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(manager.selectedDeviceID.isEmpty)
-                            Button(manager.streaming ? "Stop Stream" : "Start Stream") {
-                                manager.streaming ? manager.stopStreaming() : manager.startStreaming()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!manager.connected)
-                        }
-                    }
-                }
-
-                cardSection(title: "Media Capture") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Picture")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.9))
-
-                            Picker("Picture Format", selection: $manager.stillImageFormat) {
-                                ForEach(StillImageFormat.allCases) { format in
-                                    Text(format.title).tag(format)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            if manager.stillImageFormat.supportsQuality {
-                                HStack {
-                                    Text("Quality")
-                                        .foregroundStyle(.white.opacity(0.75))
-                                    Slider(value: $manager.stillImageQuality, in: 0.1...1.0)
-                                    Text("\(Int(manager.stillImageQuality * 100))")
-                                        .monospacedDigit()
-                                        .frame(width: 36, alignment: .trailing)
-                                        .foregroundStyle(.white.opacity(0.9))
-                                }
-                            }
-                        }
-
-                        Divider().overlay(Color.white.opacity(0.08))
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Video")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.9))
-                            Text("Format: QuickTime (.mov), H.264")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.65))
-
-                            Picker("Video Quality", selection: $manager.videoQualityPreset) {
-                                ForEach(VideoQualityPreset.allCases) { preset in
-                                    Text(preset.title).tag(preset)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            HStack(spacing: 8) {
-                                Button {
-                                    captureStillImageFromPreview()
-                                } label: {
-                                    Label("Capture Image", systemImage: "camera")
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(selectedPreviewImage == nil)
-
-                                Button {
-                                    toggleVideoRecordingFromPreview()
-                                } label: {
-                                    Label(manager.isRecordingVideo ? "Stop" : "Record",
-                                          systemImage: manager.isRecordingVideo ? "stop.fill" : "record.circle")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .disabled((!manager.isRecordingVideo && selectedPreviewImage == nil) || !manager.streaming)
-                            }
-
-                            if !manager.lastVideoPath.isEmpty {
-                                Text((manager.lastVideoPath as NSString).lastPathComponent)
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.65))
-                                    .lineLimit(2)
-                            }
-                        }
-                    }
-                }
-
-                cardSection(title: "Camera + Motor") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Mirror", isOn: Binding(get: { manager.mirror }, set: manager.setMirror))
-                        Toggle("Auto Exposure", isOn: Binding(get: { manager.autoExposure }, set: manager.setAutoExposure))
-                        Toggle("Auto White Balance", isOn: Binding(get: { manager.autoWhiteBalance }, set: manager.setAutoWhiteBalance))
-                        Toggle("Near Mode", isOn: Binding(get: { manager.nearMode }, set: manager.setNearMode))
-                            .disabled(!manager.supportsDepth)
-
-                        settingSlider(label: "Tilt", valueText: "\(manager.tiltAngle)°") {
-                            Slider(value: Binding(get: { Double(manager.tiltAngle) }, set: { manager.setTilt(Int($0)) }), in: -30...30, step: 1)
-                        }
-                        .disabled(!manager.supportsMotor)
-
-                        HStack {
-                            Text("LED")
-                            Spacer()
-                            Stepper(value: Binding(get: { manager.ledMode }, set: { manager.setLed($0) }), in: 0...6) {
-                                Text("\(manager.ledMode)")
-                                    .monospacedDigit()
-                            }
-                            .labelsHidden()
-                        }
-                        .foregroundStyle(.white.opacity(0.9))
-                        .disabled(!manager.supportsLed)
-
-                        settingSlider(label: "Manual Exposure", valueText: "\(manager.manualExposureUs) us") {
-                            Slider(value: Binding(get: { Double(manager.manualExposureUs) }, set: { manager.setManualExposure(Int($0)) }), in: 1_000...200_000, step: 1_000)
-                        }
-
-                        settingSlider(label: "IR Brightness", valueText: "\(manager.irBrightness)") {
-                            Slider(value: Binding(get: { Double(manager.irBrightness) }, set: { manager.setIrBrightness(Int($0)) }), in: 1...50, step: 1)
-                        }
-                    }
-                }
-
-                cardSection(title: "Microphone") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Enable Kinect microphone stream", isOn: Binding(
-                            get: { manager.audioEnabled },
-                            set: { manager.setAudioEnabled($0) }
-                        ))
-                        .disabled(!manager.supportsAudioInput)
-
-                        HStack(spacing: 8) {
-                            statusBadge(manager.audioEnabled ? (manager.audioStreamActive ? "Active" : "Armed") : "Off",
-                                       color: manager.audioStreamActive ? .green : (manager.audioEnabled ? .orange : .gray))
-                            if !manager.supportsAudioInput {
-                                Text("Not supported on current device/backend")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.6))
-                            }
-                        }
-
-                        HStack {
-                            Text("Input level")
-                                .foregroundStyle(.white.opacity(0.8))
-                            ProgressView(value: min(max(Double(manager.audioLevel), 0), 1))
-                                .frame(maxWidth: .infinity)
-                            Text(String(format: "%.2f", manager.audioLevel))
-                                .monospacedDigit()
-                                .frame(width: 50, alignment: .trailing)
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                }
-
-                cardSection(title: "3D Scanner") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Capture RGB / IR / depth images and generate a point cloud (PLY).")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.65))
-
-                        Button {
-                            manager.captureScanBundle()
-                        } label: {
-                            Label(manager.scannerBusy ? "Capturing..." : "Capture Scan Bundle", systemImage: "cube.transparent")
+                        Button("Connect") {
+                            manager.connectSelectedDevice()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!manager.connected || !manager.streaming || manager.scannerBusy)
-
-                        if manager.lastCapturePointCount > 0 {
-                            Text("Last point cloud: \(manager.lastCapturePointCount) points")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.75))
-                        }
-
-                        if !manager.lastCapturePath.isEmpty {
-                            Text(manager.lastCapturePath)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.55))
-                                .lineLimit(3)
-                            Button("Reveal in Finder") {
-                                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: manager.lastCapturePath)
-                            }
-                            .buttonStyle(.link)
-                        }
+                        .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
+                        .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled.")
                     }
                 }
 
-                cardSection(title: "System Camera / Mic Integration") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 8) {
-                            statusBadge("DAL \(manager.systemCameraDalInstalled ? "Installed" : "Missing")",
-                                       color: manager.systemCameraDalInstalled ? .green : .gray)
-                            statusBadge("HAL \(manager.systemAudioHalInstalled ? "Installed" : "Missing")",
-                                       color: manager.systemAudioHalInstalled ? .green : .gray)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    infoTile(title: "Device", value: selectedDeviceSummary)
+                    infoTile(title: "Stream", value: manager.streaming ? manager.streamType.title : "Stopped")
+                    infoTile(title: "Mic", value: microphoneSummary)
+                    infoTile(title: "System", value: systemSummary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var sidebarSectionPicker: some View {
+        Picker("Workspace", selection: $selectedSidebarSection) {
+            ForEach(SidebarSection.allCases) { section in
+                Text(section.rawValue).tag(section)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    private var devicesSection: some View {
+        cardSection(title: "Control Center") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Picker("Device", selection: $manager.selectedDeviceID) {
+                        if manager.devices.isEmpty {
+                            Text("No Kinect detected").tag("")
                         }
+                        ForEach(manager.devices) { device in
+                            Text("\(device.generationLabel) • \(device.serial)").tag(device.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                    .help("Choose which Kinect the app should open for preview, capture, and hardware control.")
 
-                        Toggle("Use Kinect as system camera/microphone", isOn: Binding(
-                            get: { manager.publishToSystem },
-                            set: { manager.setSystemPublish($0) }
-                        ))
-
-                        HStack(spacing: 8) {
-                            Button(manager.systemIntegrationInstallInProgress ? "Installing..." : "Install Integration") {
-                                manager.installSystemIntegration()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(manager.systemIntegrationInstallInProgress)
-
-                            Button("Re-check") {
-                                manager.refreshSystemIntegrationStatus()
-                            }
+                    VStack(spacing: 8) {
+                        Button("Refresh") { manager.refreshDevices() }
                             .buttonStyle(.bordered)
-                        }
+                            .help("Re-scan USB and backend device lists.")
 
-                        Text(manager.systemPublishNote)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.65))
-                        if !manager.systemIntegrationInstallResult.isEmpty {
-                            Text(manager.systemIntegrationInstallResult)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.65))
+                        Button("Connect") { manager.connectSelectedDevice() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
+                            .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled because the published route must own the device.")
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Preview Stream")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.65))
+                    streamSelector
+                        .help("Choose which live stream is shown in the preview and used for still/video capture.")
+                }
+
+                Button(manager.streaming ? "Stop Stream" : "Start Stream") {
+                    manager.streaming ? manager.stopStreaming() : manager.startStreaming()
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .disabled(!manager.connected || (!manager.streaming && manager.publishToSystem))
+                .help("Start or stop the live device stream for preview, recording, and scanner capture. Starting is disabled while Publish to macOS Apps is enabled.")
+
+                Text(manager.status)
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.9))
+
+                HStack(spacing: 8) {
+                    statusBadge(manager.connected ? "Connected" : "Disconnected",
+                               color: manager.connected ? .green : .red)
+                    if manager.streaming {
+                        statusBadge("Streaming \(manager.streamType.title)",
+                                   color: Color(red: 0.12, green: 0.79, blue: 0.93))
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    statusBadge(manager.supportsDepth ? "Depth Ready" : "No Depth",
+                               color: manager.supportsDepth ? .green : .gray)
+                    statusBadge(manager.supportsMotor ? "Motor" : "Fixed",
+                               color: manager.supportsMotor ? Color(red: 0.12, green: 0.79, blue: 0.93) : .gray)
+                    statusBadge(manager.supportsAudioInput ? "Audio In" : "No Audio",
+                               color: manager.supportsAudioInput ? .green : .gray)
+                }
+            }
+        }
+    }
+
+    private var mediaCaptureSection: some View {
+        cardSection(title: "Capture Settings") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Use the preview toolbar on the right to capture stills and record video. This panel only controls output settings and recent files.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Picture")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+
+                    Picker("Picture Format", selection: $manager.stillImageFormat) {
+                        ForEach(StillImageFormat.allCases) { format in
+                            Text(format.title).tag(format)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose the file format used when saving still images from the preview.")
+
+                    if manager.stillImageFormat.supportsQuality {
+                        HStack {
+                            Text("Quality")
+                                .foregroundStyle(.white.opacity(0.75))
+                            Slider(value: $manager.stillImageQuality, in: 0.1...1.0)
+                                .help("Adjust JPEG quality for still-image capture.")
+                            Text("\(Int(manager.stillImageQuality * 100))")
+                                .monospacedDigit()
+                                .frame(width: 36, alignment: .trailing)
+                                .foregroundStyle(.white.opacity(0.9))
                         }
                     }
                 }
 
-                cardSection(title: "Status") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(manager.status)
-                            .font(.callout)
-                            .foregroundStyle(.white.opacity(0.9))
-                        Text(manager.connected ? "Device connected" : "No active device")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.6))
+                Divider().overlay(Color.white.opacity(0.08))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Video")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text("Format: QuickTime (.mov), H.264")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+
+                    Picker("Video Quality", selection: $manager.videoQualityPreset) {
+                        ForEach(VideoQualityPreset.allCases) { preset in
+                            Text(preset.title).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose the preview video bitrate preset used by the built-in recorder.")
+
+                    if !manager.lastVideoPath.isEmpty {
+                        Text("Last video: \((manager.lastVideoPath as NSString).lastPathComponent)")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(2)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button("Reveal Last Capture") {
+                            revealPath(manager.lastCapturePath)
+                        }
+                        .buttonStyle(.link)
+                        .disabled(manager.lastCapturePath.isEmpty)
+                        .help("Reveal the most recent capture directory in Finder.")
+
+                        Button("Reveal Last Video") {
+                            revealPath(manager.lastVideoPath)
+                        }
+                        .buttonStyle(.link)
+                        .disabled(manager.lastVideoPath.isEmpty)
+                        .help("Reveal the most recent recorded video in Finder.")
                     }
                 }
             }
-            .padding(.vertical, 2)
         }
-        .scrollIndicators(.hidden)
+    }
+
+    private var cameraMotorSection: some View {
+        cardSection(title: "Camera + Motor") {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Mirror", isOn: Binding(get: { manager.mirror }, set: manager.setMirror))
+                    .help("Mirror the live preview and captured output horizontally when supported by the backend.")
+                Toggle("Auto Exposure", isOn: Binding(get: { manager.autoExposure }, set: manager.setAutoExposure))
+                    .help("Let the Kinect backend manage exposure automatically when the selected stream supports it.")
+                Toggle("Auto White Balance", isOn: Binding(get: { manager.autoWhiteBalance }, set: manager.setAutoWhiteBalance))
+                    .help("Let the Kinect backend manage white balance automatically for RGB capture.")
+                Toggle("Near Mode", isOn: Binding(get: { manager.nearMode }, set: manager.setNearMode))
+                    .disabled(!manager.supportsDepth)
+                    .help("Enable near mode for supported Kinect v1 depth devices.")
+
+                settingSlider(label: "Tilt", valueText: "\(manager.tiltAngle)°") {
+                    Slider(value: Binding(get: { Double(manager.tiltAngle) }, set: { manager.setTilt(Int($0)) }), in: -30...30, step: 1)
+                }
+                .disabled(!manager.supportsMotor)
+                .help("Adjust the Kinect tilt motor angle when the connected device supports it.")
+
+                HStack {
+                    Text("LED")
+                    Spacer()
+                    Stepper(value: Binding(get: { manager.ledMode }, set: { manager.setLed($0) }), in: 0...6) {
+                        Text("\(manager.ledMode)")
+                            .monospacedDigit()
+                    }
+                    .labelsHidden()
+                    .help("Change the Kinect status LED pattern when supported by the device.")
+                }
+                .foregroundStyle(.white.opacity(0.9))
+                .disabled(!manager.supportsLed)
+
+                settingSlider(label: "Manual Exposure", valueText: "\(manager.manualExposureUs) us") {
+                    Slider(value: Binding(get: { Double(manager.manualExposureUs) }, set: { manager.setManualExposure(Int($0)) }), in: 1_000...200_000, step: 1_000)
+                }
+                .help("Set the manual RGB exposure value in microseconds when auto exposure is disabled.")
+
+                settingSlider(label: "IR Brightness", valueText: "\(manager.irBrightness)") {
+                    Slider(value: Binding(get: { Double(manager.irBrightness) }, set: { manager.setIrBrightness(Int($0)) }), in: 1...50, step: 1)
+                }
+                .help("Adjust infrared brightness for supported Kinect backends.")
+
+                Divider().overlay(Color.white.opacity(0.08))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Microphone")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Text("Direct Kinect microphone capture used inside macKinect. This is device-level control, so it sits with the rest of the hardware settings.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+
+                    Text("Direct mic and Publish to macOS Apps are mutually exclusive on the current backend. If you publish the Kinect to other apps, macKinect releases the live device session first.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
+
+                    HStack(spacing: 8) {
+                        statusBadge(
+                            "Direct Mic \(manager.unifiedMicrophoneStatus)",
+                            color: manager.audioStreamActive ? .green : (manager.supportsAudioInput ? .orange : .gray),
+                            help: manager.directMicrophoneSupportDetail
+                        )
+                    }
+
+                    Toggle("Use Kinect microphone inside macKinect", isOn: Binding(
+                        get: { manager.audioEnabled },
+                        set: { manager.setAudioEnabled($0) }
+                    ))
+                    .disabled(!manager.supportsAudioInput)
+                    .help("Starts the direct Kinect microphone backend inside macKinect. This does not publish a microphone to other apps.")
+
+                    Text(manager.directMicrophoneSupportDetail)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+
+                    HStack {
+                        Text("Input level")
+                            .foregroundStyle(.white.opacity(0.8))
+                            .help("Live level meter for the direct macKinect microphone path only.")
+                        ProgressView(value: min(max(Double(manager.audioLevel), 0), 1))
+                            .frame(maxWidth: .infinity)
+                            .help("Shows the current direct-input amplitude from the Kinect microphone path.")
+                        Text(String(format: "%.2f", manager.audioLevel))
+                            .monospacedDigit()
+                            .frame(width: 50, alignment: .trailing)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .help("Current direct-input level as a normalized scalar.")
+                    }
+                }
+            }
+        }
+    }
+
+    private var scannerSection: some View {
+        cardSection(title: "3D Scanner") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Capture RGB / IR / depth images and generate a point cloud (PLY).")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+
+                Button {
+                    manager.captureScanBundle()
+                } label: {
+                    Label(manager.scannerBusy ? "Capturing..." : "Capture Scan Bundle", systemImage: "cube.transparent")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!manager.connected || !manager.streaming || manager.scannerBusy)
+                .help("Capture the current RGB, infrared, and depth frames plus a simple point-cloud export bundle.")
+
+                if manager.lastCapturePointCount > 0 {
+                    Text("Last point cloud: \(manager.lastCapturePointCount) points")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+
+                if !manager.lastCapturePath.isEmpty {
+                    Text(manager.lastCapturePath)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(3)
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: manager.lastCapturePath)
+                    }
+                    .buttonStyle(.link)
+                    .help("Reveal the latest scan bundle directory in Finder.")
+                }
+            }
+        }
+    }
+
+    private var systemIntegrationSection: some View {
+        cardSection(title: "System Camera / Mic Integration") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("One place for microphone routing and publish status. Direct capture feeds this app; system publishing exposes the Kinect to other macOS apps.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.68))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Camera Route")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Text("Native macOS camera publish is still experimental here. OBS Virtual Camera is the reliable camera path unless the camera extension is actually active.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.68))
+
+                    HStack(spacing: 8) {
+                        statusBadge(
+                            "CamExt \(manager.systemCameraExtensionAvailable ? (manager.systemCameraExtensionActive ? "Active" : (manager.systemCameraExtensionInstalled ? "Installed" : "Bundled")) : "Missing")",
+                            color: manager.systemCameraExtensionActive ? .green : (manager.systemCameraExtensionAvailable ? .orange : .gray),
+                            help: "The modern macOS camera system extension path. Active means the extension is approved and currently allowed to publish a camera."
+                        )
+                        statusBadge(
+                            "DAL \(manager.systemCameraDalInstalled ? "Installed" : "Missing")",
+                            color: manager.systemCameraDalInstalled ? .green : .gray,
+                            help: "Legacy CoreMediaIO DAL camera plugin. This is the older fallback camera path and may be ignored by recent macOS releases."
+                        )
+                        statusBadge(
+                            "Camera \(manager.systemCameraPublished ? "Published" : "Not Published")",
+                            color: manager.systemCameraPublished ? .green : .orange,
+                            help: "Whether macOS currently sees a published Kinect camera device that apps can open."
+                        )
+                    }
+
+                    if !manager.systemCameraExtensionActive && !manager.systemCameraPublished {
+                        Text("Native camera publish is not active on this machine right now. Treat OBS Virtual Camera as the supported camera route until the camera extension is properly signed and activated.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Microphone Route")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Text("This area is now only about macOS-wide publishing. Direct microphone control lives in Hardware with the rest of the device controls.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.68))
+
+                    HStack(spacing: 8) {
+                        statusBadge(
+                            "HAL \(manager.systemAudioHalInstalled ? "Installed" : "Missing")",
+                            color: manager.systemAudioHalInstalled ? .green : .gray,
+                            help: "CoreAudio HAL plugin that publishes the Kinect microphone to the rest of macOS."
+                        )
+                        statusBadge(
+                            "System Mic \(manager.systemMicPublished ? "Published" : "Not Published")",
+                            color: manager.systemMicPublished ? .green : .orange,
+                            help: "Whether macOS currently sees the published Kinect microphone device for system-wide use."
+                        )
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Publish to macOS Apps")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Text("Use this only if you want other apps to see a Kinect microphone or camera. On this machine, microphone publish may work, but the native camera path should be considered experimental until the camera extension is active.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.68))
+
+                    Toggle("Publish Kinect to macOS app device list", isOn: Binding(
+                        get: { manager.publishToSystem },
+                        set: { value in
+                            deferOnMain {
+                                manager.setSystemPublish(value)
+                            }
+                        }
+                    ))
+                    .help("Publishes the Kinect through the bundled system integration so other macOS apps can try to use it. This is separate from macKinect's own direct microphone path.")
+
+                    Picker("System Microphone Mode", selection: Binding(
+                        get: { manager.systemMicMode },
+                        set: { value in
+                            deferOnMain {
+                                manager.setSystemMicMode(value)
+                            }
+                        }
+                    )) {
+                        ForEach(SystemMicMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose what the published Kinect microphone looks like to other macOS apps.")
+
+                    Text(manager.systemMicMode.detail)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+                        .help("Explains what the selected system microphone mode exposes to other macOS apps.")
+
+                    if manager.systemCameraExtensionAvailable || manager.systemCameraDalInstalled || manager.systemCameraPublished {
+                        Picker("System Camera Stream", selection: Binding(
+                            get: { manager.systemCameraStreamType },
+                            set: { value in
+                                deferOnMain {
+                                    manager.setSystemCameraStreamType(value)
+                                }
+                            }
+                        )) {
+                            ForEach(KinectStreamType.allCases) { stream in
+                                Text(stream.title).tag(stream)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .help("Choose which Kinect stream the native system-camera path should expose when that path is available.")
+
+                        if !manager.systemCameraExtensionActive && !manager.systemCameraPublished {
+                            Text("This camera picker is retained for future native camera support, but on this machine it is not the recommended route yet.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                    } else {
+                        Text("Native system camera publish is currently unavailable here. Use OBS Virtual Camera for camera apps.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("OBS Fallback")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+
+                    Text("OBS is the most reliable camera route on this setup. The Bridge badge turns on only while macKinect is actively sending frames to OBS over Syphon.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.68))
+
+                    HStack(spacing: 8) {
+                        statusBadge(
+                            "OBS \(manager.obsInstalled ? "Installed" : "Missing")",
+                            color: manager.obsInstalled ? .green : .gray,
+                            help: "Whether OBS.app is installed in /Applications."
+                        )
+                        statusBadge(
+                            "OBS Plugin \(manager.obsKinectPluginInstalled ? "Detected" : "Missing")",
+                            color: manager.obsKinectPluginInstalled ? .green : .orange,
+                            help: "Whether an OBS plugin capable of receiving Kinect content was detected. This is optional when the Syphon bridge is used."
+                        )
+                        statusBadge(
+                            "Bridge \(manager.obsSyphonPublishingEnabled ? "On" : "Off")",
+                            color: manager.obsSyphonPublishingEnabled ? .green : .orange,
+                            help: "Whether macKinect is currently publishing preview frames to OBS over Syphon."
+                        )
+                        statusBadge(
+                            "Virtual Cam \(manager.obsVirtualCameraPublished ? "Published" : "Off")",
+                            color: manager.obsVirtualCameraPublished ? .green : .orange,
+                            help: "Whether OBS Virtual Camera is currently published as a webcam in macOS."
+                        )
+                    }
+                }
+
+                if manager.systemCameraPublished || manager.systemMicPublished {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if manager.systemCameraPublished {
+                            Text("Camera device: \(manager.systemPublishedCameraName)")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                        if manager.systemMicPublished {
+                            Text("Microphone device: \(manager.systemPublishedMicName)")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button(manager.systemIntegrationInstallInProgress ? "Installing..." : "Install Integration") {
+                        deferOnMain {
+                            manager.installSystemIntegration()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(manager.systemIntegrationInstallInProgress)
+                    .help("Install or reinstall the bundled system microphone driver and camera integration components.")
+
+                    Button(manager.systemPreferenceApplyInProgress ? "Applying..." : "Apply System Settings") {
+                        deferOnMain {
+                            manager.applySystemIntegrationPreferences()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(manager.systemPreferenceApplyInProgress || manager.systemIntegrationInstallInProgress)
+                    .help("Write the selected system camera/microphone settings into the shared macOS preferences domain so the HAL and camera extension can see them.")
+
+                    Button("Re-check") {
+                        deferOnMain {
+                            manager.refreshSystemIntegrationStatus()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Refresh the published-device checks without reinstalling anything.")
+
+                    Button("Release Hardware") {
+                        deferOnMain {
+                            manager.releaseHardwareForSystemIntegration()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!manager.connected && !manager.streaming)
+                    .help("Close the current Kinect session so system integrations or OBS can claim the device.")
+                }
+
+                HStack(spacing: 8) {
+                    Button("Launch OBS Virtual Camera") {
+                        deferOnMain {
+                            manager.launchOBSVirtualCamera()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!manager.obsInstalled)
+                    .help("Launch OBS and request its Virtual Camera output. This is the practical fallback camera path on current macOS.")
+
+                    Button("Open OBS Plugins") {
+                        revealPath(manager.obsPluginsFolderPath)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!manager.obsInstalled)
+                    .help("Open the user OBS plugins folder where an obs-kinect-style source plugin can be installed.")
+                }
+
+                Text(manager.systemPublishNote)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .help("High-level summary of the current system camera and microphone publish state.")
+                Text(manager.obsIntegrationNote)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .help("Current OBS fallback state and what the app expects next.")
+                if !manager.systemIntegrationInstallResult.isEmpty {
+                    Text(manager.systemIntegrationInstallResult)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+                        .help("Result of the last integration install or activation attempt.")
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Diagnostics")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                        Spacer()
+                        Button("Reveal Log") {
+                            revealPath(manager.diagnosticsLogPath)
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Open the persistent macKinect diagnostics log in Finder.")
+                    }
+
+                    Text(manager.diagnosticsLogPath)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.white.opacity(0.5))
+                        .textSelection(.enabled)
+                        .help("Persistent log file containing audio, device, and integration traces for debugging.")
+
+                    if manager.recentDiagnostics.isEmpty {
+                        Text("No diagnostics captured yet.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.55))
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(manager.recentDiagnostics.suffix(6).enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.white.opacity(0.72))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+            }
+        }
+    }
+
+    private var selectedDeviceSummary: String {
+        guard let device = manager.devices.first(where: { $0.id == manager.selectedDeviceID }) else {
+            return manager.connected ? "Connected" : "Not selected"
+        }
+        if device.serial.isEmpty {
+            return device.name
+        }
+        return "\(device.name) • \(device.serial)"
+    }
+
+    private var microphoneSummary: String {
+        if manager.audioStreamActive {
+            return "Active"
+        }
+        if manager.audioEnabled {
+            return "Armed"
+        }
+        return manager.supportsAudioInput ? "Off" : "Unavailable"
+    }
+
+    private var systemSummary: String {
+        if manager.systemCameraPublished || manager.systemMicPublished {
+            return "Published"
+        }
+        if manager.systemCameraDalInstalled || manager.systemAudioHalInstalled || manager.systemCameraExtensionInstalled {
+            return "Installed"
+        }
+        return "Inactive"
     }
 
     private var panelCardBackground: some View {
@@ -510,7 +983,7 @@ struct ContentView: View {
         }
     }
 
-    private func statusBadge(_ text: String, color: Color) -> some View {
+    private func statusBadge(_ text: String, color: Color, help: String? = nil) -> some View {
         Text(text)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white)
@@ -520,6 +993,16 @@ struct ContentView: View {
             .overlay(
                 Capsule().stroke(color.opacity(0.45), lineWidth: 1)
             )
+            .help(help ?? text)
+    }
+
+    private func quickActionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     private func infoTile(title: String, value: String) -> some View {
@@ -530,11 +1013,40 @@ struct ContentView: View {
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(panelCardBackground)
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
+    private var captureRootPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Pictures", isDirectory: true)
+            .appendingPathComponent("KinectCaptures", isDirectory: true)
+            .path
+    }
+
+    private func revealPath(_ path: String) {
+        guard !path.isEmpty else { return }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return }
+
+        if isDirectory.boolValue {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        }
+    }
+
+    private func deferOnMain(_ action: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: action)
     }
 }
 
@@ -558,6 +1070,8 @@ private struct PlaceholderView: View {
 }
 
 private extension Data {
+    // Preview rendering keeps the bridge payloads in their native formats and
+    // converts them only when the active SwiftUI view needs a CGImage.
     func rgbCGImage(width: Int, height: Int) -> CGImage? {
         guard width > 0, height > 0 else { return nil }
         guard count >= width * height * 3 else { return nil }

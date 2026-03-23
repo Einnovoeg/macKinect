@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 022
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build-control-center"
@@ -36,6 +37,29 @@ if [[ ! -d "${DAL_SRC}" && -d "${BUILD_DIR}/KinectCameraDAL.plugin" ]]; then
 fi
 DAL_DST="/Library/CoreMediaIO/Plug-Ins/DAL/KinectCameraDAL.plugin"
 APP_FRAMEWORKS_DIR="${APP_BUNDLE}/Contents/Frameworks"
+APP_FIRMWARE_PATH="${APP_BUNDLE}/Contents/Resources/libfreenect/audios.bin"
+INTEGRATION_PREFS_PATH="/Library/Preferences/com.mackinect.integration.plist"
+SYSTEM_CAMERA_STREAM="$(
+  /usr/bin/defaults read com.mackinect.integration SystemCameraStream 2>/dev/null || echo 0
+)"
+SYSTEM_MIC_MODE="$(
+  /usr/bin/defaults read com.mackinect.integration SystemMicrophoneMode 2>/dev/null || echo 0
+)"
+CODESIGN_IDENTITY="-"
+
+if [[ -d "${APP_BUNDLE}" ]]; then
+  APP_AUTHORITY="$(/usr/bin/codesign -dv --verbose=2 "${APP_BUNDLE}" 2>&1 | /usr/bin/awk -F= '/^Authority=/{print $2; exit}')"
+  if [[ -n "${APP_AUTHORITY}" ]]; then
+    CODESIGN_IDENTITY="${APP_AUTHORITY}"
+  fi
+fi
+
+if [[ "${CODESIGN_IDENTITY}" == "-" && -d "${HAL_SRC}" ]]; then
+  HAL_AUTHORITY="$(/usr/bin/codesign -dv --verbose=2 "${HAL_SRC}" 2>&1 | /usr/bin/awk -F= '/^Authority=/{print $2; exit}')"
+  if [[ -n "${HAL_AUTHORITY}" ]]; then
+    CODESIGN_IDENTITY="${HAL_AUTHORITY}"
+  fi
+fi
 
 CAN_PROMPT_SUDO=0
 if [[ -t 0 && -t 1 ]]; then
@@ -44,11 +68,19 @@ fi
 
 run_privileged() {
   if [[ "${CAN_PROMPT_SUDO}" -eq 1 ]]; then
-    sudo "$@"
+    sudo -- "$@"
     return $?
   fi
   return 1
 }
+
+TMP_HAL_ROOT=""
+TMP_DAL_ROOT=""
+cleanup() {
+  [[ -n "${TMP_DAL_ROOT}" ]] && rm -rf "${TMP_DAL_ROOT}"
+  [[ -n "${TMP_HAL_ROOT}" ]] && rm -rf "${TMP_HAL_ROOT}"
+}
+trap cleanup EXIT
 
 if [[ ! -d "${HAL_SRC}" ]]; then
   echo "HAL source bundle not found." >&2
@@ -64,16 +96,72 @@ if [[ "${CAN_PROMPT_SUDO}" -ne 1 ]]; then
   exit 2
 fi
 
+if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
+  echo "This macKinect build is ad hoc signed, so macOS will ignore the installed HAL/DAL bundles." >&2
+  echo "Build the app with a real Apple Developer signing identity before running this installer." >&2
+  exit 3
+fi
+
 echo "Installing Audio HAL:"
 echo "  ${HAL_SRC}"
 echo "  -> ${HAL_DST}"
-run_privileged ditto "${HAL_SRC}" "${HAL_DST}"
+echo "  signing identity: ${CODESIGN_IDENTITY}"
+TMP_HAL_ROOT="$(mktemp -d /tmp/KinectAudioHAL-install.XXXXXX)"
+TMP_HAL="${TMP_HAL_ROOT}/KinectAudioHAL.driver"
+TMP_HAL_FRAMEWORKS="${TMP_HAL}/Contents/Frameworks"
+TMP_HAL_BIN="${TMP_HAL}/Contents/MacOS/KinectAudioHAL"
+/usr/bin/ditto "${HAL_SRC}" "${TMP_HAL}"
+
+if [[ -d "${APP_FRAMEWORKS_DIR}" ]]; then
+  mkdir -p "${TMP_HAL_FRAMEWORKS}"
+  for pattern in "libfreenect*.dylib" "libusb-1.0*.dylib" "libturbojpeg*.dylib"; do
+    for lib in "${APP_FRAMEWORKS_DIR}"/${pattern}; do
+      [[ -e "${lib}" ]] || continue
+      /usr/bin/ditto "${lib}" "${TMP_HAL_FRAMEWORKS}/$(basename "${lib}")"
+    done
+  done
+fi
+
+if [[ -f "${APP_FIRMWARE_PATH}" ]]; then
+  mkdir -p "${TMP_HAL}/Contents/Resources/libfreenect"
+  /usr/bin/ditto "${APP_FIRMWARE_PATH}" "${TMP_HAL}/Contents/Resources/libfreenect/audios.bin"
+fi
+
+if [[ -f "${TMP_HAL_BIN}" ]]; then
+  /usr/bin/install_name_tool -add_rpath "@loader_path/../Frameworks" "${TMP_HAL_BIN}" >/dev/null 2>&1 || true
+  for dep in "${TMP_HAL_FRAMEWORKS}"/libfreenect*.dylib "${TMP_HAL_FRAMEWORKS}"/libusb-1.0*.dylib "${TMP_HAL_FRAMEWORKS}"/libturbojpeg*.dylib; do
+    [[ -e "${dep}" ]] || continue
+    dep_base="$(basename "${dep}")"
+    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/${dep_base}" "@rpath/${dep_base}" "${TMP_HAL_BIN}" || true
+  done
+  /usr/bin/install_name_tool -change "/opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib" "@rpath/libusb-1.0.0.dylib" "${TMP_HAL_BIN}" || true
+  /usr/bin/install_name_tool -change "/opt/homebrew/opt/jpeg-turbo/lib/libturbojpeg.0.dylib" "@rpath/libturbojpeg.0.dylib" "${TMP_HAL_BIN}" || true
+fi
+
+for lib in "${TMP_HAL_FRAMEWORKS}"/libfreenect*.dylib; do
+  [[ -e "${lib}" ]] || continue
+  base="$(basename "${lib}")"
+  /usr/bin/install_name_tool -id "@loader_path/${base}" "${lib}" || true
+  /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libusb-1.0.0.dylib" "@loader_path/libusb-1.0.0.dylib" "${lib}" || true
+done
+for lib in "${TMP_HAL_FRAMEWORKS}"/libusb-1.0*.dylib "${TMP_HAL_FRAMEWORKS}"/libturbojpeg*.dylib; do
+  [[ -e "${lib}" ]] || continue
+  base="$(basename "${lib}")"
+  /usr/bin/install_name_tool -id "@loader_path/${base}" "${lib}" || true
+done
+
+/usr/bin/codesign --force --deep --sign "${CODESIGN_IDENTITY}" --timestamp=none "${TMP_HAL}"
+/usr/bin/codesign --verify --verbose=2 --deep "${TMP_HAL}"
+run_privileged rm -rf "${HAL_DST}"
+run_privileged ditto "${TMP_HAL}" "${HAL_DST}"
+rm -rf "${TMP_HAL_ROOT}"
+TMP_HAL_ROOT=""
 
 if [[ -d "${DAL_SRC}" ]]; then
   TMP_DAL_ROOT="$(mktemp -d /tmp/KinectCameraDAL-install.XXXXXX)"
   TMP_DAL="${TMP_DAL_ROOT}/KinectCameraDAL.plugin"
-  TMP_DAL_FRAMEWORKS="${TMP_DAL}/Frameworks"
-  TMP_DAL_BIN="${TMP_DAL}/KinectCameraDAL"
+  TMP_DAL_FRAMEWORKS="${TMP_DAL}/Contents/Frameworks"
+  TMP_DAL_BIN="${TMP_DAL}/Contents/MacOS/KinectCameraDAL"
   /usr/bin/ditto "${DAL_SRC}" "${TMP_DAL}"
 
   if [[ -d "${APP_FRAMEWORKS_DIR}" ]]; then
@@ -87,38 +175,49 @@ if [[ -d "${DAL_SRC}" ]]; then
   fi
 
   if [[ -f "${TMP_DAL_BIN}" ]]; then
-    /usr/bin/install_name_tool -add_rpath "@loader_path/Frameworks" "${TMP_DAL_BIN}" >/dev/null 2>&1 || true
+    /usr/bin/install_name_tool -add_rpath "@loader_path/../Frameworks" "${TMP_DAL_BIN}" >/dev/null 2>&1 || true
     /usr/bin/install_name_tool -change "/opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib" "@rpath/libusb-1.0.0.dylib" "${TMP_DAL_BIN}" || true
     /usr/bin/install_name_tool -change "/opt/homebrew/opt/jpeg-turbo/lib/libturbojpeg.0.dylib" "@rpath/libturbojpeg.0.dylib" "${TMP_DAL_BIN}" || true
   fi
 
-  if [[ -f "${TMP_DAL_FRAMEWORKS}/libfreenect.0.7.5.dylib" ]]; then
-    /usr/bin/install_name_tool -id "@loader_path/libfreenect.0.7.5.dylib" "${TMP_DAL_FRAMEWORKS}/libfreenect.0.7.5.dylib" || true
-    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libusb-1.0.0.dylib" "@loader_path/libusb-1.0.0.dylib" "${TMP_DAL_FRAMEWORKS}/libfreenect.0.7.5.dylib" || true
-  fi
-  if [[ -f "${TMP_DAL_FRAMEWORKS}/libfreenect2.0.2.0.dylib" ]]; then
-    /usr/bin/install_name_tool -id "@loader_path/libfreenect2.0.2.0.dylib" "${TMP_DAL_FRAMEWORKS}/libfreenect2.0.2.0.dylib" || true
-    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libusb-1.0.0.dylib" "@loader_path/libusb-1.0.0.dylib" "${TMP_DAL_FRAMEWORKS}/libfreenect2.0.2.0.dylib" || true
-    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libturbojpeg.0.dylib" "@loader_path/libturbojpeg.0.dylib" "${TMP_DAL_FRAMEWORKS}/libfreenect2.0.2.0.dylib" || true
-  fi
-  if [[ -f "${TMP_DAL_FRAMEWORKS}/libusb-1.0.0.dylib" ]]; then
-    /usr/bin/install_name_tool -id "@loader_path/libusb-1.0.0.dylib" "${TMP_DAL_FRAMEWORKS}/libusb-1.0.0.dylib" || true
-  fi
-  if [[ -f "${TMP_DAL_FRAMEWORKS}/libturbojpeg.0.4.0.dylib" ]]; then
-    /usr/bin/install_name_tool -id "@loader_path/libturbojpeg.0.4.0.dylib" "${TMP_DAL_FRAMEWORKS}/libturbojpeg.0.4.0.dylib" || true
-  fi
+  for lib in "${TMP_DAL_FRAMEWORKS}"/libfreenect*.dylib; do
+    [[ -e "${lib}" ]] || continue
+    base="$(basename "${lib}")"
+    /usr/bin/install_name_tool -id "@loader_path/${base}" "${lib}" || true
+    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libusb-1.0.0.dylib" "@loader_path/libusb-1.0.0.dylib" "${lib}" || true
+  done
+  for lib in "${TMP_DAL_FRAMEWORKS}"/libfreenect2*.dylib; do
+    [[ -e "${lib}" ]] || continue
+    base="$(basename "${lib}")"
+    /usr/bin/install_name_tool -id "@loader_path/${base}" "${lib}" || true
+    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libusb-1.0.0.dylib" "@loader_path/libusb-1.0.0.dylib" "${lib}" || true
+    /usr/bin/install_name_tool -change "@executable_path/../Frameworks/libturbojpeg.0.dylib" "@loader_path/libturbojpeg.0.dylib" "${lib}" || true
+  done
+  for lib in "${TMP_DAL_FRAMEWORKS}"/libusb-1.0*.dylib "${TMP_DAL_FRAMEWORKS}"/libturbojpeg*.dylib; do
+    [[ -e "${lib}" ]] || continue
+    base="$(basename "${lib}")"
+    /usr/bin/install_name_tool -id "@loader_path/${base}" "${lib}" || true
+  done
 
-  /usr/bin/codesign --force --deep --sign - --timestamp=none "${TMP_DAL}"
+  /usr/bin/codesign --force --deep --sign "${CODESIGN_IDENTITY}" --timestamp=none "${TMP_DAL}"
+  /usr/bin/codesign --verify --verbose=2 --deep "${TMP_DAL}"
 
   echo "Installing Camera DAL plugin:"
   echo "  ${TMP_DAL}"
   echo "  -> ${DAL_DST}"
+  run_privileged rm -rf "${DAL_DST}"
   run_privileged ditto "${TMP_DAL}" "${DAL_DST}"
-  run_privileged /usr/bin/codesign --force --deep --sign - --timestamp=none "${DAL_DST}"
   rm -rf "${TMP_DAL_ROOT}"
+  TMP_DAL_ROOT=""
 else
   echo "Camera DAL plugin not found at ${DAL_SRC}; skipping camera installation."
 fi
+
+echo "Writing shared integration preferences:"
+echo "  camera stream: ${SYSTEM_CAMERA_STREAM}"
+echo "  microphone mode: ${SYSTEM_MIC_MODE}"
+run_privileged /usr/bin/defaults write "${INTEGRATION_PREFS_PATH}" SystemCameraStream -int "${SYSTEM_CAMERA_STREAM}"
+run_privileged /usr/bin/defaults write "${INTEGRATION_PREFS_PATH}" SystemMicrophoneMode -int "${SYSTEM_MIC_MODE}"
 
 echo "Restarting audio/camera services..."
 run_privileged killall coreaudiod || true

@@ -50,13 +50,15 @@ void* gQueueAlteredRefCon = nullptr;
 CMFormatDescriptionRef gFormatDescription = nullptr;
 std::thread gProducerThread;
 std::atomic<bool> gProducerRunning{false};
-std::atomic<UInt32> gRunningClients{0};
+std::mutex gRunStateMutex;
+UInt32 gRunningClients = 0;
 std::atomic<uint64_t> gFrameCounter{0};
 
 class KinectFrameSource {
  public:
   bool start() {
-    stop();
+    std::lock_guard<std::mutex> lock(mutex_);
+    stopLocked();
 
     auto try_backend = [&](std::unique_ptr<KinectBackend> backend) -> bool {
       if (!backend) {
@@ -98,11 +100,7 @@ class KinectFrameSource {
 
   void stop() {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (device_) {
-      device_->stop();
-      device_.reset();
-    }
-    backend_.reset();
+    stopLocked();
   }
 
   bool nextRGB(std::vector<uint8_t>& rgb, int& width, int& height) {
@@ -128,6 +126,13 @@ class KinectFrameSource {
   }
 
  private:
+  void stopLocked() {
+    if (device_) {
+      device_->stop();
+      device_.reset();
+    }
+    backend_.reset();
+  }
   std::mutex mutex_;
   std::unique_ptr<KinectBackend> backend_;
   std::unique_ptr<KinectDevice> device_;
@@ -162,15 +167,15 @@ bool EnsureFormatDescriptionLocked() {
 }
 
 void FillFallbackPattern(std::uint8_t* base, std::size_t bytes_per_row, uint64_t frame_index) {
+  (void)frame_index;
   for (int y = 0; y < kOutputHeight; ++y) {
     auto* row = base + y * bytes_per_row;
     for (int x = 0; x < kOutputWidth; ++x) {
-      const std::uint8_t r = static_cast<std::uint8_t>((x + frame_index) % 256);
-      const std::uint8_t g = static_cast<std::uint8_t>((y + frame_index * 2) % 256);
-      const std::uint8_t b = static_cast<std::uint8_t>((x + y + frame_index * 3) % 256);
-      row[x * 4 + 0] = b;
-      row[x * 4 + 1] = g;
-      row[x * 4 + 2] = r;
+      const bool marker = (x % 64 == 0) || (y % 64 == 0);
+      const std::uint8_t v = marker ? static_cast<std::uint8_t>(40) : static_cast<std::uint8_t>(0);
+      row[x * 4 + 0] = v;
+      row[x * 4 + 1] = v;
+      row[x * 4 + 2] = v;
       row[x * 4 + 3] = 255;
     }
   }
@@ -311,9 +316,19 @@ void ProducerLoop() {
   }
 }
 
+UInt32 RunningClientCount() {
+  std::lock_guard<std::mutex> lock(gRunStateMutex);
+  return gRunningClients;
+}
+
 void StartProducingIfNeeded() {
-  const UInt32 previous = gRunningClients.fetch_add(1, std::memory_order_acq_rel);
-  if (previous != 0) {
+  bool should_start = false;
+  {
+    std::lock_guard<std::mutex> lock(gRunStateMutex);
+    ++gRunningClients;
+    should_start = (gRunningClients == 1);
+  }
+  if (!should_start) {
     NotifyDeviceRunningChanged();
     return;
   }
@@ -321,34 +336,61 @@ void StartProducingIfNeeded() {
   gFrameCounter.store(0, std::memory_order_release);
   gKinectSource.start();
   gProducerRunning.store(true, std::memory_order_release);
-  gProducerThread = std::thread(ProducerLoop);
+  {
+    std::lock_guard<std::mutex> lock(gRunStateMutex);
+    gProducerThread = std::thread(ProducerLoop);
+  }
   NotifyDeviceRunningChanged();
 }
 
 void StopProducingIfNeeded() {
-  const UInt32 previous = gRunningClients.fetch_sub(1, std::memory_order_acq_rel);
-  if (previous > 1) {
+  bool should_stop = false;
+  {
+    std::lock_guard<std::mutex> lock(gRunStateMutex);
+    if (gRunningClients == 0) {
+      return;
+    }
+    --gRunningClients;
+    should_stop = (gRunningClients == 0);
+  }
+  if (!should_stop) {
     NotifyDeviceRunningChanged();
     return;
   }
 
   gProducerRunning.store(false, std::memory_order_release);
-  if (gProducerThread.joinable()) {
-    gProducerThread.join();
+  std::thread producer_thread;
+  {
+    std::lock_guard<std::mutex> lock(gRunStateMutex);
+    if (gProducerThread.joinable()) {
+      producer_thread = std::move(gProducerThread);
+    }
+  }
+  if (producer_thread.joinable()) {
+    producer_thread.join();
   }
   gKinectSource.stop();
 
-  std::lock_guard<std::mutex> lock(gStateMutex);
-  FlushQueueLocked();
+  {
+    std::lock_guard<std::mutex> lock(gStateMutex);
+    FlushQueueLocked();
+  }
   NotifyDeviceRunningChanged();
 }
 
 void TeardownObjects() {
-  gProducerRunning.store(false, std::memory_order_release);
-  if (gProducerThread.joinable()) {
-    gProducerThread.join();
+  std::thread producer_thread;
+  {
+    std::lock_guard<std::mutex> lock(gRunStateMutex);
+    gRunningClients = 0;
+    if (gProducerThread.joinable()) {
+      producer_thread = std::move(gProducerThread);
+    }
   }
-  gRunningClients.store(0, std::memory_order_release);
+  gProducerRunning.store(false, std::memory_order_release);
+  if (producer_thread.joinable()) {
+    producer_thread.join();
+  }
   gKinectSource.stop();
 
   std::lock_guard<std::mutex> lock(gStateMutex);
@@ -838,7 +880,7 @@ OSStatus PlugInObjectGetPropertyData(
         if (data_size < sizeof(CFStringRef)) {
           return kCMIOHardwareBadPropertySizeError;
         }
-        *reinterpret_cast<CFStringRef*>(data) = CopyCFString("Kinect Camera");
+        *reinterpret_cast<CFStringRef*>(data) = CopyCFString("Kinect");
         if (data_used != nullptr) {
           *data_used = sizeof(CFStringRef);
         }
@@ -884,12 +926,12 @@ OSStatus PlugInObjectGetPropertyData(
         return noErr;
       }
       case kCMIODevicePropertyTransportType:
-        return WriteScalar(data_size, data_used, data, static_cast<UInt32>('virt'));
+        return WriteScalar(data_size, data_used, data, static_cast<UInt32>('usb '));
       case kCMIODevicePropertyDeviceIsAlive:
         return WriteScalar(data_size, data_used, data, static_cast<UInt32>(1));
       case kCMIODevicePropertyDeviceIsRunning:
       case kCMIODevicePropertyDeviceIsRunningSomewhere:
-        return WriteScalar(data_size, data_used, data, gRunningClients.load() > 0 ? static_cast<UInt32>(1) : static_cast<UInt32>(0));
+        return WriteScalar(data_size, data_used, data, RunningClientCount() > 0 ? static_cast<UInt32>(1) : static_cast<UInt32>(0));
       case kCMIODevicePropertySuspendedByUser:
       case kCMIODevicePropertyHogMode:
       case kCMIODevicePropertyLatency:
@@ -954,7 +996,7 @@ OSStatus PlugInObjectGetPropertyData(
         if (data_size < sizeof(CFStringRef)) {
           return kCMIOHardwareBadPropertySizeError;
         }
-        *reinterpret_cast<CFStringRef*>(data) = CopyCFString("Kinect RGB Stream");
+        *reinterpret_cast<CFStringRef*>(data) = CopyCFString("Kinect");
         if (data_used != nullptr) {
           *data_used = sizeof(CFStringRef);
         }
@@ -1068,7 +1110,7 @@ OSStatus PlugInDeviceSuspend(CMIOHardwarePlugInRef, CMIODeviceID device_id) {
   if (device_id != gDeviceObjectID) {
     return kCMIOHardwareBadDeviceError;
   }
-  while (gRunningClients.load() > 0) {
+  while (RunningClientCount() > 0) {
     StopProducingIfNeeded();
   }
   return noErr;
@@ -1099,7 +1141,7 @@ OSStatus PlugInDeviceStopStream(CMIOHardwarePlugInRef, CMIODeviceID device_id, C
   if (stream_id != gStreamObjectID) {
     return kCMIOHardwareBadStreamError;
   }
-  if (gRunningClients.load() > 0) {
+  if (RunningClientCount() > 0) {
     StopProducingIfNeeded();
   }
   return noErr;

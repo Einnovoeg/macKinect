@@ -88,6 +88,8 @@
   NSMutableArray<NSDictionary *> *result = [NSMutableArray array];
 
   {
+    // Probe each backend independently so the UI can present a combined device
+    // list without committing to a single generation up front.
     auto backend = CreateKinectV1Backend();
     if (backend) {
       (void)backend->probe();
@@ -175,6 +177,15 @@
   return _device != nullptr;
 }
 
+- (void)closeDevice {
+  if (_device) {
+    _device->stop();
+    _device.reset();
+  }
+  _backend.reset();
+  _streaming = NO;
+}
+
 - (void)startStream {
   if (!_device) {
     return;
@@ -197,6 +208,9 @@
     return nil;
   }
 
+  // Copy the current backend-owned buffers into NSData snapshots before
+  // returning to Swift. That keeps preview rendering decoupled from the next
+  // backend update cycle.
   _device->update();
   if (!_device->getFrame(_frame)) {
     return nil;
@@ -298,6 +312,13 @@
     return 0.0f;
   }
   return _device->audioLevel();
+}
+
+- (NSString *)audioDebugSummary {
+  if (!_device) {
+    return @"device=none";
+  }
+  return [NSString stringWithUTF8String:_device->audioDebugSummary().c_str()];
 }
 
 - (NSDictionary *)deviceCapabilities {

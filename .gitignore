@@ -1,13 +1,56 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# CMake and local build output
 build/
 build-*/
 build_*/
 build*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+Testing/
+
+# Packaged artifacts
 dist/
-.DS_Store
-*.log
 *.app
 *.dmg
 *.pkg
 *.zip
-kinect-gui-app
-kinect-gui-app-fixed
+
+# Swift and Xcode caches
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Python caches used by repo helper scripts
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Local logs, scratch output, and module caches
+*.log
+*.tmp
+*.swp
+*.swo
+*.orig
+module-cache/
+packaging-home/
+test-home/
+.audio-test/
+.build-cache/
+
+# Local firmware blobs with unclear redistribution rights
+firmware/*.bin
+
+# Local dependency checkouts and SDK drops used during development
+libfreenect/
+libfreenect2/
+OpenNI-Bin-Dev-MacOSX-v1.5.7.10/

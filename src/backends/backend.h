@@ -84,6 +84,7 @@ public:
     virtual bool setAudioEnabled(bool) { return false; }
     virtual bool audioEnabled() const { return false; }
     virtual float audioLevel() const { return 0.0f; }
+    virtual std::string audioDebugSummary() const { return "audio-debug=unavailable"; }
 
     // Capability flags
     virtual bool supportsMotor() const { return false; }
