@@ -1,16 +1,14 @@
 # Release Notes
 
-## macKinect 1.1.1
+## macKinect 1.1.2
 
-Release date: 2026-03-23
+Release date: 2026-03-29
 
 ### Highlights
 
-- Privileged installer hardening for system microphone and camera components
-- Safer HAL microphone startup behavior when Kinect audio is unavailable
-- Cleaner repo boundary for third-party dependency checkouts and local SDK drops
-- Fixed installer packaging from workspace paths that contain spaces
-- Continued GUI polish, release metadata cleanup, and redistribution guidance refresh
+- Final installer hardening pass so privileged staging respects `TMPDIR`
+- Fresh smoke verification and privacy scan on the current repo state
+- Updated release packaging and metadata for a new GitHub release
 
 ### Verification Summary
 

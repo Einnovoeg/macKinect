@@ -1678,7 +1678,8 @@ final class KinectManager: ObservableObject {
         // local process could pre-create or race.
         commands.append("cleanup() { [ -n \"${STAGED_DAL_ROOT:-}\" ] && /bin/rm -rf \"$STAGED_DAL_ROOT\"; [ -n \"${STAGED_HAL_ROOT:-}\" ] && /bin/rm -rf \"$STAGED_HAL_ROOT\"; }")
         commands.append("trap cleanup EXIT")
-        commands.append("STAGED_HAL_ROOT=$(/usr/bin/mktemp -d /tmp/KinectAudioHAL-install.XXXXXX)")
+        commands.append("STAGED_TMP_BASE=\"${TMPDIR:-/tmp}\"")
+        commands.append("STAGED_HAL_ROOT=$(/usr/bin/mktemp -d \"${STAGED_TMP_BASE%/}/KinectAudioHAL-install.XXXXXX\")")
         commands.append("STAGED_HAL=\"$STAGED_HAL_ROOT/KinectAudioHAL.driver\"")
         commands.append("STAGED_HAL_FRAMEWORKS=\"$STAGED_HAL/Contents/Frameworks\"")
         commands.append("STAGED_HAL_BINARY=\"$STAGED_HAL/Contents/MacOS/KinectAudioHAL\"")
@@ -1737,7 +1738,7 @@ done
         if let cameraDalSourcePath {
             let systemDalPath = "/Library/CoreMediaIO/Plug-Ins/DAL/KinectCameraDAL.plugin"
 
-            commands.append("STAGED_DAL_ROOT=$(/usr/bin/mktemp -d /tmp/KinectCameraDAL-install.XXXXXX)")
+            commands.append("STAGED_DAL_ROOT=$(/usr/bin/mktemp -d \"${STAGED_TMP_BASE%/}/KinectCameraDAL-install.XXXXXX\")")
             commands.append("STAGED_DAL_PLUGIN=\"$STAGED_DAL_ROOT/KinectCameraDAL.plugin\"")
             commands.append("STAGED_DAL_FRAMEWORKS=\"$STAGED_DAL_PLUGIN/Contents/Frameworks\"")
             commands.append("STAGED_DAL_BINARY=\"$STAGED_DAL_PLUGIN/Contents/MacOS/KinectCameraDAL\"")

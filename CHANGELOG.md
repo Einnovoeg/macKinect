@@ -2,6 +2,12 @@
 
 All notable changes to `macKinect` are documented in this file.
 
+## 1.1.2 - 2026-03-29
+
+- Hardened privileged installer staging further by honoring `TMPDIR` instead of assuming `/tmp` in both the shell installer and the app-driven privileged install flow.
+- Re-ran smoke verification, privacy scanning, and release packaging against the current repo state before publishing.
+- Refreshed release metadata for a new GitHub release with the current changelog and artifacts.
+
 ## 1.1.1 - 2026-03-23
 
 - Hardened the privileged system-integration installer to use secure temporary staging directories, consistent shell safety flags, and post-signature verification before privileged copies.
