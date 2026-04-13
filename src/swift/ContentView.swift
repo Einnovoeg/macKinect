@@ -429,14 +429,22 @@ struct ContentView: View {
     private var cameraMotorSection: some View {
         cardSection(title: "Camera + Motor") {
             VStack(alignment: .leading, spacing: 10) {
+                Text(manager.imageControlSupportDetail)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .help("Explains which device-level image controls are currently safe to apply.")
+
                 Toggle("Mirror", isOn: Binding(get: { manager.mirror }, set: manager.setMirror))
+                    .disabled(!manager.canApplyImageControls)
                     .help("Mirror the live preview and captured output horizontally when supported by the backend.")
                 Toggle("Auto Exposure", isOn: Binding(get: { manager.autoExposure }, set: manager.setAutoExposure))
+                    .disabled(!manager.canApplyImageControls)
                     .help("Let the Kinect backend manage exposure automatically when the selected stream supports it.")
                 Toggle("Auto White Balance", isOn: Binding(get: { manager.autoWhiteBalance }, set: manager.setAutoWhiteBalance))
+                    .disabled(!manager.canApplyImageControls)
                     .help("Let the Kinect backend manage white balance automatically for RGB capture.")
                 Toggle("Near Mode", isOn: Binding(get: { manager.nearMode }, set: manager.setNearMode))
-                    .disabled(!manager.supportsDepth)
+                    .disabled(!manager.supportsDepth || !manager.canApplyImageControls)
                     .help("Enable near mode for supported Kinect v1 depth devices.")
 
                 settingSlider(label: "Tilt", valueText: "\(manager.tiltAngle)°") {
@@ -461,11 +469,13 @@ struct ContentView: View {
                 settingSlider(label: "Manual Exposure", valueText: "\(manager.manualExposureUs) us") {
                     Slider(value: Binding(get: { Double(manager.manualExposureUs) }, set: { manager.setManualExposure(Int($0)) }), in: 1_000...200_000, step: 1_000)
                 }
+                .disabled(!manager.canApplyImageControls)
                 .help("Set the manual RGB exposure value in microseconds when auto exposure is disabled.")
 
                 settingSlider(label: "IR Brightness", valueText: "\(manager.irBrightness)") {
                     Slider(value: Binding(get: { Double(manager.irBrightness) }, set: { manager.setIrBrightness(Int($0)) }), in: 1...50, step: 1)
                 }
+                .disabled(!manager.canApplyImageControls)
                 .help("Adjust infrared brightness for supported Kinect backends.")
 
                 Divider().overlay(Color.white.opacity(0.08))

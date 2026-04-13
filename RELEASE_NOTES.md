@@ -1,18 +1,20 @@
 # Release Notes
 
-## macKinect 1.1.2
+## macKinect 1.0
 
-Release date: 2026-03-29
+Release date: 2026-04-12
 
 ### Highlights
 
-- Final installer hardening pass so privileged staging respects `TMPDIR`
-- Fresh smoke verification and privacy scan on the current repo state
-- Updated release packaging and metadata for a new GitHub release
+- Native macOS Kinect control center for Kinect v1 and Kinect v2
+- Live RGB, infrared, and depth preview with still and video capture
+- Simple scan bundle export with point-cloud output
+- System microphone and camera integration paths, with OBS Virtual Camera fallback for practical webcam use
+- Public repository cleanup for licensing, privacy, packaging, and release documentation
 
-### Verification Summary
+### Verification summary
 
-This release is intended to be verified with:
+This release was verified with:
 
 - successful CMake configure
 - successful `macKinect` app build
@@ -21,13 +23,18 @@ This release is intended to be verified with:
   - `--version`
   - `--list`
   - `--integration-status`
-- successful packaging through `./package-app.sh`
-- successful installer packaging preflight through `./package-installer.sh` with a real Apple signing identity, or an intentional refusal when the build remains ad hoc signed
+- fresh first-party PII scan
+- fresh release packaging pass
 
-### Known Limitations
+### Known limitations
 
-- Hardware features cannot be fully validated without a connected Kinect sensor.
-- Kinect v1 audio still requires a user-supplied `audios.bin` firmware blob.
-- Camera publishing on modern macOS depends on signing, entitlements, and user approval for the bundled Camera Extension.
-- The DAL plugin remains available only as a compatibility fallback where Camera Extension activation is unavailable.
-- OBS Virtual Camera remains the most reliable webcam path on current macOS builds.
+- Camera Extension activation still depends on valid Apple signing, entitlements, provisioning, and user approval
+- DAL publishing remains a compatibility fallback and is not reliable on all modern macOS versions
+- Kinect v1 image-control writes are disabled on current macOS builds because the underlying `libfreenect` control-transfer path can crash in `libusb`
+- Kinect v1 audio still requires a user-supplied `audios.bin` firmware blob
+- The `.pkg` wrapper remains unsigned unless `MACOS_PKG_SIGN_IDENTITY` is configured during packaging
+- Hardware-dependent features still need broader real-device validation
+
+### Help wanted
+
+If you use this release and find a bug, please open an issue or a fix. The project especially needs help with camera-extension activation, system microphone validation, Kinect v1 control stability, and better scanner reconstruction quality.

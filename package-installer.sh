@@ -9,7 +9,7 @@ SANDBOX_HOME_DIR="${BUILD_DIR}/packaging-home"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 PKG_ROOT="${DIST_DIR}/pkgroot-${STAMP}"
 PKG_SCRIPTS="${DIST_DIR}/pkgscripts-${STAMP}"
-APP_VERSION="1.1.0"
+APP_VERSION="1.0.0"
 if [[ -f "${SCRIPT_DIR}/VERSION" ]]; then
   APP_VERSION="$(tr -d '[:space:]' < "${SCRIPT_DIR}/VERSION")"
 fi

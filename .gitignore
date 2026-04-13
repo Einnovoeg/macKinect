@@ -41,6 +41,7 @@ __pycache__/
 *.swp
 *.swo
 *.orig
+AGENTS.md
 module-cache/
 packaging-home/
 test-home/

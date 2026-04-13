@@ -440,12 +440,16 @@ final class KinectManager: ObservableObject {
         if supportsLed {
             bridge?.setLed(ledMode)
         }
-        bridge?.setMirror(mirror)
-        bridge?.setAutoExposure(autoExposure)
-        bridge?.setAutoWhiteBalance(autoWhiteBalance)
-        bridge?.setNearMode(nearMode)
-        bridge?.setManualExposureUs(manualExposureUs)
-        bridge?.setIrBrightness(irBrightness)
+        if shouldApplyImageControlFlags {
+            bridge?.setMirror(mirror)
+            bridge?.setAutoExposure(autoExposure)
+            bridge?.setAutoWhiteBalance(autoWhiteBalance)
+            bridge?.setNearMode(nearMode)
+            bridge?.setManualExposureUs(manualExposureUs)
+            bridge?.setIrBrightness(irBrightness)
+        } else {
+            trace("device", "Skipping mirror/exposure/IR control flags for this backend to avoid unsafe v1 control transfers.")
+        }
     }
 
     func setTilt(_ value: Int) {
@@ -460,32 +464,44 @@ final class KinectManager: ObservableObject {
 
     func setMirror(_ value: Bool) {
         mirror = value
-        bridge?.setMirror(value)
+        if shouldApplyImageControlFlags {
+            bridge?.setMirror(value)
+        }
     }
 
     func setAutoExposure(_ value: Bool) {
         autoExposure = value
-        bridge?.setAutoExposure(value)
+        if shouldApplyImageControlFlags {
+            bridge?.setAutoExposure(value)
+        }
     }
 
     func setAutoWhiteBalance(_ value: Bool) {
         autoWhiteBalance = value
-        bridge?.setAutoWhiteBalance(value)
+        if shouldApplyImageControlFlags {
+            bridge?.setAutoWhiteBalance(value)
+        }
     }
 
     func setNearMode(_ value: Bool) {
         nearMode = value
-        bridge?.setNearMode(value)
+        if shouldApplyImageControlFlags {
+            bridge?.setNearMode(value)
+        }
     }
 
     func setManualExposure(_ value: Int) {
         manualExposureUs = max(1000, min(200000, value))
-        bridge?.setManualExposureUs(manualExposureUs)
+        if shouldApplyImageControlFlags {
+            bridge?.setManualExposureUs(manualExposureUs)
+        }
     }
 
     func setIrBrightness(_ value: Int) {
         irBrightness = max(1, min(50, value))
-        bridge?.setIrBrightness(irBrightness)
+        if shouldApplyImageControlFlags {
+            bridge?.setIrBrightness(irBrightness)
+        }
     }
 
     func setAudioEnabled(_ value: Bool) {
@@ -2249,6 +2265,29 @@ done
             audioStreamActive = false
             audioLevel = 0
             return
+        }
+    }
+
+    private var shouldApplyImageControlFlags: Bool {
+        // libfreenect v1 control transfers (mirror/exposure/near/IR) can
+        // dereference a null USB handle on recent macOS builds, causing a
+        // crash inside libusb_control_transfer during device connect. Disable
+        // those control writes for Kinect v1 until a safe subdevice path exists.
+        return currentDevice?.generation == 2
+    }
+
+    var canApplyImageControls: Bool {
+        shouldApplyImageControlFlags
+    }
+
+    var imageControlSupportDetail: String {
+        switch currentDevice?.generation {
+        case 2:
+            return "Image control flags are available for Kinect v2 in the current backend."
+        case 1:
+            return "Mirror, exposure, white balance, near mode, and infrared brightness are temporarily disabled for Kinect v1 on current macOS builds because the underlying libfreenect control transfer path can crash."
+        default:
+            return "Connect a device to determine which image controls are available."
         }
     }
 
