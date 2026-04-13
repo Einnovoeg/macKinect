@@ -10,12 +10,14 @@
 
 namespace {
 
+// BackendChoice defines the available Kinect backend options.
 enum class BackendChoice {
   kAuto,
   kV1,
   kV2,
 };
 
+// Options holds the configuration parsed from command line arguments.
 struct Options {
   bool run_preview = false;
   bool list_devices = false;
@@ -23,6 +25,7 @@ struct Options {
   BackendChoice backend = BackendChoice::kAuto;
 };
 
+// PrintUsage displays the command line usage instructions.
 void PrintUsage(const char *program) {
   std::cout << "Usage: " << program << " [options]\n"
             << "\n"
@@ -34,6 +37,7 @@ void PrintUsage(const char *program) {
             << "  --help, -h          Show this help\n";
 }
 
+// ParsePositiveInt attempts to parse a string into a positive integer.
 bool ParsePositiveInt(const std::string &text, int *value) {
   try {
     const int parsed = std::stoi(text);
@@ -47,6 +51,7 @@ bool ParsePositiveInt(const std::string &text, int *value) {
   }
 }
 
+// ParseBackendChoice converts a string into a BackendChoice enum value.
 bool ParseBackendChoice(const std::string &raw, BackendChoice *choice) {
   if (raw == "auto") {
     *choice = BackendChoice::kAuto;
@@ -63,6 +68,7 @@ bool ParseBackendChoice(const std::string &raw, BackendChoice *choice) {
   return false;
 }
 
+// MatchesChoice checks if a given KinectBackend matches the requested BackendChoice.
 bool MatchesChoice(const KinectBackend &backend, BackendChoice choice) {
   if (choice == BackendChoice::kAuto) {
     return true;
@@ -78,6 +84,8 @@ bool MatchesChoice(const KinectBackend &backend, BackendChoice choice) {
 
 }  // namespace
 
+// main is the entry point of the application. It parses command line arguments
+// and either launches the GUI application or executes CLI-based device discovery and preview.
 int main(int argc, char **argv) {
   Options options;
   bool gui_mode = false;
