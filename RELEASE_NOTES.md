@@ -11,6 +11,7 @@ Release date: 2026-04-12
 - Simple scan bundle export with point-cloud output
 - System microphone and camera integration paths, with OBS Virtual Camera fallback for practical webcam use
 - Public repository cleanup for licensing, privacy, packaging, and release documentation
+- First-party app icon integrated into the app bundle and packaged release assets
 
 ### Verification summary
 
@@ -25,6 +26,7 @@ This release was verified with:
   - `--integration-status`
 - fresh first-party PII scan
 - fresh release packaging pass
+- verified app icon bundle metadata and installed app copy
 
 ### Known limitations
 

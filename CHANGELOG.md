@@ -14,4 +14,6 @@ All notable changes to `macKinect` are documented in this file.
 - Preserved the Buy Me a Coffee support link as the only intentional personal link
 - Added local-only agent handoff guidance in `AGENTS.md` and excluded it from git
 - Fixed a current macOS crash path by disabling unsafe Kinect v1 image-control transfers that can crash inside `libusb`
+- Added first-party app icon assets and wired them into the packaged app bundle
+- Documented how to build against shared local `libfreenect` / `libfreenect2` checkouts kept outside the repo
 - Updated the public documentation to clearly describe what works, what still does not work, and where contributors can help

@@ -42,6 +42,8 @@ __pycache__/
 *.swo
 *.orig
 AGENTS.md
+session*.md
+session-*.md
 module-cache/
 packaging-home/
 test-home/
@@ -52,6 +54,8 @@ test-home/
 firmware/*.bin
 
 # Local dependency checkouts and SDK drops used during development
+libfreenect
 libfreenect/
+libfreenect2
 libfreenect2/
 OpenNI-Bin-Dev-MacOSX-v1.5.7.10/

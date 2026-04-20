@@ -35,6 +35,14 @@ These third-party source trees can be checked out locally next to the project an
 
 They are intentionally ignored by git in this repository so upstream git metadata and local machine history are not published accidentally. Their license obligations are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+If you keep those local source trees in a shared library location outside the repo, pass their paths into CMake:
+
+```bash
+cmake -S . -B build-control-center \
+  -DLIBFREENECT_ROOT=/path/to/libfreenect \
+  -DKINECT_LIBFREENECT2_ROOT=/path/to/libfreenect2
+```
+
 ## Optional Runtime Dependencies
 
 ### OBS.app

@@ -82,6 +82,14 @@ cmake -S . -B build-control-center -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-control-center --target macKinect -j4
 ```
 
+If your local `libfreenect` or `libfreenect2` checkouts live outside the repo, point CMake at them explicitly:
+
+```bash
+cmake -S . -B build-control-center -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DLIBFREENECT_ROOT=/path/to/libfreenect \
+  -DKINECT_LIBFREENECT2_ROOT=/path/to/libfreenect2
+```
+
 ### Launch the app
 
 ```bash

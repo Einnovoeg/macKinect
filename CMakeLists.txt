@@ -634,6 +634,16 @@ if(CMAKE_Swift_COMPILER)
         )
     endif()
 
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/AppIcon.icns")
+        add_custom_command(TARGET macKinect POST_BUILD
+            # Keep the bundle icon in sync with the repo asset so packaged
+            # apps and local smoke-test builds show the same icon in Finder.
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/resources/AppIcon.icns" $<TARGET_BUNDLE_DIR:macKinect>/Contents/Resources/AppIcon.icns
+            COMMENT "Copying app icon to bundle"
+            VERBATIM
+        )
+    endif()
+
     if(KINECT_V1_FIRMWARE_PATH)
         if(TARGET KinectAudioHAL)
             add_custom_command(TARGET macKinect POST_BUILD
