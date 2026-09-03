@@ -42,8 +42,7 @@ struct ContentView: View {
         }
         .tint(Color(red: 0.12, green: 0.79, blue: 0.93))
         .frame(minWidth: 1280, minHeight: 820)
-        // Disable implicit animations for the content stack to prevent
-        // text moving/shrinking when @Published properties change at 30Hz.
+        // Disable implicit animations to prevent text jitter at 30Hz.
         .animation(nil, value: manager.connected)
         .animation(nil, value: manager.streaming)
         .onAppear {
@@ -58,24 +57,29 @@ struct ContentView: View {
             updateFrameTimerConnection()
         }
         .onReceive(frameTimer) { _ in
-            guard let frame = manager.pollFrame() else { return }
-            let newRgbImage = frame.rgbData.rgbCGImage(width: frame.width, height: frame.height)
-            rgbImage = newRgbImage
-            irImage = frame.irData.grayCGImage(width: frame.width, height: frame.height)
-            depthImage = frame.depthData.depthCGImage(width: frame.width, height: frame.height)
+            var txn = Transaction()
+            txn.animation = nil
+            txn.disablesAnimations = true
+            withTransaction(txn) {
+                guard let frame = manager.pollFrame() else { return }
+                let newRgbImage = frame.rgbData.rgbCGImage(width: frame.width, height: frame.height)
+                rgbImage = newRgbImage
+                irImage = frame.irData.grayCGImage(width: frame.width, height: frame.height)
+                depthImage = frame.depthData.depthCGImage(width: frame.width, height: frame.height)
 
-            if let newRgbImage {
-                manager.processTrackingFrame(
-                    newRgbImage,
-                    depthData: frame.depthData,
-                    width: frame.width,
-                    height: frame.height
-                )
-            }
+                if let newRgbImage {
+                    manager.processTrackingFrame(
+                        newRgbImage,
+                        depthData: frame.depthData,
+                        width: frame.width,
+                        height: frame.height
+                    )
+                }
 
-            if let image = selectedPreviewImage {
-                manager.appendPreviewFrameForRecording(image, streamType: manager.streamType)
-                manager.publishPreviewFrameToOBS(image)
+                if let image = selectedPreviewImage {
+                    manager.appendPreviewFrameForRecording(image, streamType: manager.streamType)
+                    manager.publishPreviewFrameToOBS(image)
+                }
             }
         }
     }
@@ -190,7 +194,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Left Control Panel (stable width, no implicit animations)
+    // MARK: - Left Control Panel (stable, no implicit animations)
     private var controlsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerSummarySection
@@ -219,9 +223,7 @@ struct ContentView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    // MARK: - Header Summary (fixed layout to prevent text jitter)
-    // All dynamic text uses fixedSize + lineLimit + animation(nil)
-    // to avoid font scaling or HStack rebalancing on every audioLevel/status poll.
+    // MARK: - Header Summary (fixed layout to prevent jitter)
     private var headerSummarySection: some View {
         cardSection {
             VStack(alignment: .leading, spacing: 12) {
@@ -601,7 +603,8 @@ struct ContentView: View {
                     Label(manager.scannerBusy ? "Capturing..." : "Capture Scan Bundle", systemImage: "cube.transparent")
                 }
                 .buttonStyle(.borderedProminent)
-                 .help("Capture the current RGB, infrared, and depth frames plus a simple point-cloud export bundle.")
+                .disabled(manager.scannerBusy)
+                .help("Capture the current RGB, infrared, and depth frames plus a simple point-cloud export bundle.")
 
 
                 if manager.lastCapturePointCount > 0 {
@@ -1136,7 +1139,6 @@ struct ContentView: View {
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                // Fixed height prevents vertical jitter when status strings change length.
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(10)

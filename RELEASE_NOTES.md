@@ -1,5 +1,45 @@
 # Release Notes
 
+## macKinect 1.2
+
+Release date: 2026-09-04
+
+### Highlights
+
+- Native macOS Kinect control center for Kinect v1 and Kinect v2
+- Live RGB, infrared, and depth preview with still and video capture + Vision overlay
+- Simple scan bundle export with point-cloud output + full ICP registration
+- Apple Vision 3D skeletal tracking with VRChat OSC export (RGB+IR, depth-fused)
+- System microphone (HAL) and camera (DAL/Camera Extension + OBS fallback) — now robust on ad-hoc builds via user-domain fallback
+- Stable left-panel layout: no more text moving/shrinking (throttled high-frequency state, isolated transactions)
+- Public repository cleanup for licensing, privacy, packaging, and release documentation
+
+### What changed in 1.2
+
+- **Comprehensive UI jitter fix:** `ContentView.onReceive` now uses `withTransaction(disablesAnimations:true)` for 30Hz polling; throttled `audioLevel` (quantized 5Hz), `recordingVideoSeconds` (4Hz), `recentDiagnostics` (3Hz) in `KinectManager`; previous 1.1 fixed `infoTile`/`header`/`picker` layout still present
+- **Ad-hoc system integration:** HAL firmware search includes `~/Library/Audio/...`, `refreshSystemIntegrationStatus` checks both `/Library` and `~/Library` for HAL/DAL, `installSystemIntegration` no longer blocks on ad-hoc but warns and continues; signature messages now route to OBS Virtual Camera when installed
+- **HAL:** Added user-domain firmware candidates in `KinectAudioHALPlugin.cpp:277-291`
+
+### Verification summary (1.2)
+
+- Rebuilt with Xcode toolchain `/Volumes/Mac Stick/Applications/Xcode.app` + `arch -arm64 /opt/homebrew/bin/cmake` (`SDKROOT` = `MacOSX.sdk`), `CMAKE_OSX_ARCHITECTURES=arm64`
+- `macKinect --version` → 1.2.0, `codesign --verify --deep` valid (ad-hoc)
+- CLI smoke: `--help`, `--version`, `--list`, `--integration-status` (HAL/DAL bundled, OBS Virtual Camera published)
+- PII scan clean, third-party licenses preserved, app copied to `/Users/einnovoeg/Applications`
+
+### Known limitations (1.2)
+
+- Camera Extension still requires Apple signing + provisioning + user approval; on ad-hoc builds, **OBS Virtual Camera is the reliable webcam path** (install OBS.app, System → Launch OBS Virtual Camera)
+- HAL/DAL installed system-wide still prefer Apple-issued identities; ad-hoc system-wide installs are ignored by `coreaudiod`/`CMIO` — user-domain fallback may still be ignored on macOS 12.1+; use OBS
+- `audios.bin` still user-supplied for v1 mic; ICP tuning pending broader real-scan testing
+
+### Help wanted (1.2)
+
+- Please test HAL/DAL via `~/Library` on clean ad-hoc installs and report `log stream --predicate 'subsystem=="com.mackinect.audiohal"'` + `systemextensionsctl list` + `ffmpeg -f avfoundation -list_devices true -i ""`
+- Also test OBS fallback latency and mic array vs processed mono
+
+---
+
 ## macKinect 1.1
 
 Release date: 2026-09-03

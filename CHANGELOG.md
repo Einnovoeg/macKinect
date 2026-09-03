@@ -2,6 +2,13 @@
 
 All notable changes to `macKinect` are documented in this file.
 
+## 1.2.0 - 2026-09-04
+
+- **UI twitching fix (comprehensive):** Isolated 30Hz preview polling via `withTransaction(disablesAnimations:true)`, throttled `audioLevel` (5Hz, quantized 0.1), `recordingVideoSeconds` (4Hz), and `recentDiagnostics` (3Hz) in `KinectManager.swift`; left-panel already had fixed `infoTile` height and `animation(nil)` — now also throttled at source so ScrollView diagnostics no longer relayouts at 30Hz
+- **System mic/camera for ad-hoc builds:** HAL firmware search now includes `~/Library/Audio/Plug-Ins/HAL/.../Resources/libfreenect` for user-domain installs; `refreshSystemIntegrationStatus` checks both `/Library` and `~/Library` for HAL/DAL; `installSystemIntegration` no longer blocks on ad-hoc but warns and continues to user-domain fallback; signature-issue messages now suggest OBS Virtual Camera for ad-hoc instead of blocking
+- **OBS fallback promoted:** When HAL/DAL ignored due to ad-hoc signing and OBS is installed, system notes now direct to OBS Virtual Camera as reliable path; `systemPublishNote` no longer reports fatal ad-hoc error when OBS available
+- **Docs & version:** Bumped `VERSION` to 1.2.0; verified build with Xcode toolchain (`/Volumes/Mac Stick/Applications/Xcode.app`), `codesign --verify`, and CLI smoke tests; rebuilt `build-smoke`/`build-control-center` and copied to `/Users/einnovoeg/Applications`
+
 ## 1.1.0 - 2026-09-03
 
 - **GUI polish:** Fixed left-panel text moving/shrinking when app is open
