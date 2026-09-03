@@ -59,3 +59,15 @@ libfreenect/
 libfreenect2
 libfreenect2/
 OpenNI-Bin-Dev-MacOSX-v1.5.7.10/
+Kinect/
+Kinect
+
+# Session / agent local files
+AGENTS.md
+session*.md
+session-*.md
+.kiro/
+
+# App icon sources (keep generated .icns)
+resources/AppIcon-master.png.bak
+resources/AppIcon.png

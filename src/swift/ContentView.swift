@@ -19,6 +19,7 @@ struct ContentView: View {
     private enum SidebarSection: String, CaseIterable, Identifiable {
         case control = "Control"
         case capture = "Capture"
+        case tracking = "Tracking"
         case hardware = "Hardware"
         case system = "System"
 
@@ -32,6 +33,7 @@ struct ContentView: View {
             HStack(alignment: .top, spacing: 16) {
                 controlsPanel
                     .frame(width: 392)
+                    .fixedSize(horizontal: true, vertical: false)
 
                 previewPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -40,6 +42,10 @@ struct ContentView: View {
         }
         .tint(Color(red: 0.12, green: 0.79, blue: 0.93))
         .frame(minWidth: 1280, minHeight: 820)
+        // Disable implicit animations for the content stack to prevent
+        // text moving/shrinking when @Published properties change at 30Hz.
+        .animation(nil, value: manager.connected)
+        .animation(nil, value: manager.streaming)
         .onAppear {
             manager.performInitialLoadIfNeeded()
             updateFrameTimerConnection()
@@ -53,9 +59,19 @@ struct ContentView: View {
         }
         .onReceive(frameTimer) { _ in
             guard let frame = manager.pollFrame() else { return }
-            rgbImage = frame.rgbData.rgbCGImage(width: frame.width, height: frame.height)
+            let newRgbImage = frame.rgbData.rgbCGImage(width: frame.width, height: frame.height)
+            rgbImage = newRgbImage
             irImage = frame.irData.grayCGImage(width: frame.width, height: frame.height)
             depthImage = frame.depthData.depthCGImage(width: frame.width, height: frame.height)
+
+            if let newRgbImage {
+                manager.processTrackingFrame(
+                    newRgbImage,
+                    depthData: frame.depthData,
+                    width: frame.width,
+                    height: frame.height
+                )
+            }
 
             if let image = selectedPreviewImage {
                 manager.appendPreviewFrameForRecording(image, streamType: manager.streamType)
@@ -158,6 +174,9 @@ struct ContentView: View {
                     if manager.isRecordingVideo {
                         statusBadge("REC \(String(format: "%.1fs", manager.recordingVideoSeconds))", color: .red)
                     }
+                    if manager.trackingEnabled {
+                        statusBadge(manager.trackingStatus, color: .green)
+                    }
                 }
                 .padding(12)
             }
@@ -171,6 +190,7 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Left Control Panel (stable width, no implicit animations)
     private var controlsPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerSummarySection
@@ -184,6 +204,8 @@ struct ContentView: View {
                     case .capture:
                         mediaCaptureSection
                         scannerSection
+                    case .tracking:
+                        trackingSection
                     case .hardware:
                         cameraMotorSection
                     case .system:
@@ -197,30 +219,40 @@ struct ContentView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
+    // MARK: - Header Summary (fixed layout to prevent text jitter)
+    // All dynamic text uses fixedSize + lineLimit + animation(nil)
+    // to avoid font scaling or HStack rebalancing on every audioLevel/status poll.
     private var headerSummarySection: some View {
         cardSection {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .top) {
+                    HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("macKinect")
                                 .font(.system(size: 30, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
+                                .fixedSize(horizontal: false, vertical: true)
                             Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
                                 .font(.callout)
                                 .foregroundStyle(.white.opacity(0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(2, reservesSpace: true)
                         }
-
-                        Spacer(minLength: 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
 
                         VStack(alignment: .trailing, spacing: 8) {
                             statusBadge(manager.connected ? "Ready" : "Idle",
                                         color: manager.connected ? Color(red: 0.12, green: 0.79, blue: 0.93) : .gray)
+                                .fixedSize(horizontal: true, vertical: false)
                             Text("v\(appVersion)")
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.white.opacity(0.55))
+                                .fixedSize(horizontal: true, vertical: false)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                     }
+                    .animation(nil, value: manager.connected)
 
                     HStack(spacing: 8) {
                         quickActionButton("Refresh Devices", systemImage: "arrow.clockwise") {
@@ -235,6 +267,8 @@ struct ContentView: View {
                         Text("Quick Connect")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.62))
+                            .frame(width: 88, alignment: .leading)
+                            .fixedSize(horizontal: true, vertical: false)
 
                         Picker("Quick Device", selection: $manager.selectedDeviceID) {
                             if manager.devices.isEmpty {
@@ -245,24 +279,33 @@ struct ContentView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(maxWidth: .infinity)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .clipped()
                         .help("Choose a Kinect and connect without leaving the summary card.")
 
                         Button("Connect") {
                             manager.connectSelectedDevice()
                         }
                         .buttonStyle(.borderedProminent)
+                        .fixedSize(horizontal: true, vertical: false)
                         .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
                         .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled.")
                     }
+                    .animation(nil, value: manager.selectedDeviceID)
+                    .animation(nil, value: manager.devices.count)
                 }
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                     infoTile(title: "Device", value: selectedDeviceSummary)
                     infoTile(title: "Stream", value: manager.streaming ? manager.streamType.title : "Stopped")
                     infoTile(title: "Mic", value: microphoneSummary)
                     infoTile(title: "System", value: systemSummary)
                 }
+                .animation(nil, value: selectedDeviceSummary)
+                .animation(nil, value: manager.streaming)
+                .animation(nil, value: microphoneSummary)
+                .animation(nil, value: systemSummary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -325,6 +368,10 @@ struct ContentView: View {
                 Text(manager.status)
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(2, reservesSpace: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(nil, value: manager.status)
 
                 HStack(spacing: 8) {
                     statusBadge(manager.connected ? "Connected" : "Disconnected",
@@ -411,15 +458,15 @@ struct ContentView: View {
                             revealPath(manager.lastCapturePath)
                         }
                         .buttonStyle(.link)
-                        .disabled(manager.lastCapturePath.isEmpty)
-                        .help("Reveal the most recent capture directory in Finder.")
+                     .help("Reveal the most recent capture directory in Finder.")
+
 
                         Button("Reveal Last Video") {
                             revealPath(manager.lastVideoPath)
                         }
                         .buttonStyle(.link)
-                        .disabled(manager.lastVideoPath.isEmpty)
-                        .help("Reveal the most recent recorded video in Finder.")
+                     .help("Reveal the most recent recorded video in Finder.")
+
                     }
                 }
             }
@@ -429,54 +476,65 @@ struct ContentView: View {
     private var cameraMotorSection: some View {
         cardSection(title: "Camera + Motor") {
             VStack(alignment: .leading, spacing: 10) {
-                Text(manager.imageControlSupportDetail)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
-                    .help("Explains which device-level image controls are currently safe to apply.")
+                HStack {
+                    Toggle("Mirror", isOn: Binding(get: { manager.mirror }, set: manager.setMirror))
+                }
+                .help("Mirror the live preview and captured output horizontally when supported by the backend.")
 
-                Toggle("Mirror", isOn: Binding(get: { manager.mirror }, set: manager.setMirror))
-                    .disabled(!manager.canApplyImageControls)
-                    .help("Mirror the live preview and captured output horizontally when supported by the backend.")
-                Toggle("Auto Exposure", isOn: Binding(get: { manager.autoExposure }, set: manager.setAutoExposure))
-                    .disabled(!manager.canApplyImageControls)
-                    .help("Let the Kinect backend manage exposure automatically when the selected stream supports it.")
-                Toggle("Auto White Balance", isOn: Binding(get: { manager.autoWhiteBalance }, set: manager.setAutoWhiteBalance))
-                    .disabled(!manager.canApplyImageControls)
-                    .help("Let the Kinect backend manage white balance automatically for RGB capture.")
-                Toggle("Near Mode", isOn: Binding(get: { manager.nearMode }, set: manager.setNearMode))
-                    .disabled(!manager.supportsDepth || !manager.canApplyImageControls)
-                    .help("Enable near mode for supported Kinect v1 depth devices.")
+                HStack {
+                    Toggle("Auto Exposure", isOn: Binding(get: { manager.autoExposure }, set: manager.setAutoExposure))
+                }
+                .help("Let the Kinect backend manage exposure automatically when the selected stream supports it.")
+
+                HStack {
+                    Toggle("Auto White Balance", isOn: Binding(get: { manager.autoWhiteBalance }, set: manager.setAutoWhiteBalance))
+                }
+                .help("Let the Kinect backend manage white balance automatically for RGB capture.")
+
+                HStack {
+                    Toggle("Near Mode", isOn: Binding(get: { manager.nearMode }, set: manager.setNearMode))
+                }
+                .help("Enable near mode for supported Kinect v1 depth devices.")
 
                 settingSlider(label: "Tilt", valueText: "\(manager.tiltAngle)°") {
                     Slider(value: Binding(get: { Double(manager.tiltAngle) }, set: { manager.setTilt(Int($0)) }), in: -30...30, step: 1)
                 }
-                .disabled(!manager.supportsMotor)
                 .help("Adjust the Kinect tilt motor angle when the connected device supports it.")
 
                 HStack {
                     Text("LED")
                     Spacer()
-                    Stepper(value: Binding(get: { manager.ledMode }, set: { manager.setLed($0) }), in: 0...6) {
-                        Text("\(manager.ledMode)")
-                            .monospacedDigit()
+                    Picker("LED Mode", selection: Binding(get: { manager.ledMode }, set: { manager.setLed($0) })) {
+                        ForEach(0...6, id: \.self) { mode in
+                            Text(KinectManager.ledModeDisplayName(for: mode)).tag(mode)
+                        }
                     }
+                    .pickerStyle(.menu)
                     .labelsHidden()
                     .help("Change the Kinect status LED pattern when supported by the device.")
                 }
                 .foregroundStyle(.white.opacity(0.9))
-                .disabled(!manager.supportsLed)
 
-                settingSlider(label: "Manual Exposure", valueText: "\(manager.manualExposureUs) us") {
-                    Slider(value: Binding(get: { Double(manager.manualExposureUs) }, set: { manager.setManualExposure(Int($0)) }), in: 1_000...200_000, step: 1_000)
+                HStack {
+                    settingSlider(label: "Manual Exposure", valueText: "\(manager.manualExposureUs) us") {
+                        Slider(value: Binding(get: { Double(manager.manualExposureUs) }, set: { manager.setManualExposure(Int($0)) }), in: 1_000...200_000, step: 1_000)
+                    }
                 }
-                .disabled(!manager.canApplyImageControls)
                 .help("Set the manual RGB exposure value in microseconds when auto exposure is disabled.")
 
-                settingSlider(label: "IR Brightness", valueText: "\(manager.irBrightness)") {
-                    Slider(value: Binding(get: { Double(manager.irBrightness) }, set: { manager.setIrBrightness(Int($0)) }), in: 1...50, step: 1)
+                HStack {
+                    settingSlider(label: "IR Brightness", valueText: "\(manager.irBrightness)") {
+                        Slider(value: Binding(get: { Double(manager.irBrightness) }, set: { manager.setIrBrightness(Int($0)) }), in: 1...50, step: 1)
+                    }
                 }
-                .disabled(!manager.canApplyImageControls)
                 .help("Adjust infrared brightness for supported Kinect backends.")
+                
+                if !manager.canApplyImageControls {
+                    Text(manager.imageControlSupportDetail)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.top, 4)
+                }
 
                 Divider().overlay(Color.white.opacity(0.08))
 
@@ -505,8 +563,8 @@ struct ContentView: View {
                         get: { manager.audioEnabled },
                         set: { manager.setAudioEnabled($0) }
                     ))
-                    .disabled(!manager.supportsAudioInput)
-                    .help("Starts the direct Kinect microphone backend inside macKinect. This does not publish a microphone to other apps.")
+                     .help("Starts the direct Kinect microphone backend inside macKinect. This does not publish a microphone to other apps.")
+
 
                     Text(manager.directMicrophoneSupportDetail)
                         .font(.caption)
@@ -543,8 +601,8 @@ struct ContentView: View {
                     Label(manager.scannerBusy ? "Capturing..." : "Capture Scan Bundle", systemImage: "cube.transparent")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!manager.connected || !manager.streaming || manager.scannerBusy)
-                .help("Capture the current RGB, infrared, and depth frames plus a simple point-cloud export bundle.")
+                 .help("Capture the current RGB, infrared, and depth frames plus a simple point-cloud export bundle.")
+
 
                 if manager.lastCapturePointCount > 0 {
                     Text("Last point cloud: \(manager.lastCapturePointCount) points")
@@ -563,6 +621,47 @@ struct ContentView: View {
                     .buttonStyle(.link)
                     .help("Reveal the latest scan bundle directory in Finder.")
                 }
+            }
+        }
+    }
+
+    private var trackingSection: some View {
+        cardSection(title: "Tracking") {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Enable Tracking", isOn: Binding(
+                    get: { manager.trackingEnabled },
+                    set: { manager.setTrackingEnabled($0) }
+                ))
+                .help("Run native Vision tracking on the live Kinect RGB stream.")
+
+                Toggle("Face Tracking", isOn: $manager.trackingFacesEnabled)
+                    .disabled(!manager.trackingEnabled)
+                    .help("Detect face rectangles in the live RGB stream.")
+
+                Toggle("Body Pose Tracking", isOn: $manager.trackingBodyEnabled)
+                    .disabled(!manager.trackingEnabled)
+                    .help("Detect 2D human body joints in the live RGB stream.")
+
+                Toggle("Show Overlay", isOn: $manager.trackingOverlayVisible)
+                    .disabled(!manager.trackingEnabled)
+                    .help("Draw face boxes and body joints over the RGB preview.")
+
+                Divider().overlay(Color.white.opacity(0.08))
+
+                HStack(spacing: 8) {
+                    statusBadge("\(manager.trackingResult.faces.count) Face",
+                               color: manager.trackingResult.faces.isEmpty ? .gray : .green)
+                    statusBadge("\(manager.trackingResult.bodies.count) Body",
+                               color: manager.trackingResult.bodies.isEmpty ? .gray : Color(red: 0.12, green: 0.79, blue: 0.93))
+                }
+
+                Text(manager.trackingStatus)
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.9))
+
+                Text("Overlay coordinates are aligned to the RGB stream. Switch Preview Stream to RGB when tuning tracking.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
             }
         }
     }
@@ -752,18 +851,18 @@ struct ContentView: View {
                             manager.installSystemIntegration()
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(manager.systemIntegrationInstallInProgress)
-                    .help("Install or reinstall the bundled system microphone driver and camera integration components.")
+                     .buttonStyle(.borderedProminent)
+                     .help("Install or reinstall the bundled system microphone driver and camera integration components.")
+
 
                     Button(manager.systemPreferenceApplyInProgress ? "Applying..." : "Apply System Settings") {
                         deferOnMain {
                             manager.applySystemIntegrationPreferences()
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(manager.systemPreferenceApplyInProgress || manager.systemIntegrationInstallInProgress)
-                    .help("Write the selected system camera/microphone settings into the shared macOS preferences domain so the HAL and camera extension can see them.")
+                     .buttonStyle(.bordered)
+                     .help("Write the selected system camera/microphone settings into the shared macOS preferences domain so the HAL and camera extension can see them.")
+
 
                     Button("Re-check") {
                         deferOnMain {
@@ -778,9 +877,9 @@ struct ContentView: View {
                             manager.releaseHardwareForSystemIntegration()
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!manager.connected && !manager.streaming)
-                    .help("Close the current Kinect session so system integrations or OBS can claim the device.")
+                     .buttonStyle(.bordered)
+                     .help("Close the current Kinect session so system integrations or OBS can claim the device.")
+
                 }
 
                 HStack(spacing: 8) {
@@ -789,16 +888,16 @@ struct ContentView: View {
                             manager.launchOBSVirtualCamera()
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!manager.obsInstalled)
-                    .help("Launch OBS and request its Virtual Camera output. This is the practical fallback camera path on current macOS.")
+                     .buttonStyle(.bordered)
+                     .help("Launch OBS and request its Virtual Camera output. This is the practical fallback camera path on current macOS.")
+
 
                     Button("Open OBS Plugins") {
                         revealPath(manager.obsPluginsFolderPath)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!manager.obsInstalled)
-                    .help("Open the user OBS plugins folder where an obs-kinect-style source plugin can be installed.")
+                     .buttonStyle(.bordered)
+                     .help("Open the user OBS plugins folder where an obs-kinect-style source plugin can be installed.")
+
                 }
 
                 Text(manager.systemPublishNote)
@@ -938,9 +1037,17 @@ struct ContentView: View {
         switch manager.streamType {
         case .rgb:
             if let rgbImage {
-                Image(decorative: rgbImage, scale: 1.0)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                ZStack {
+                    Image(decorative: rgbImage, scale: 1.0)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                    if manager.trackingEnabled, manager.trackingOverlayVisible {
+                        TrackingOverlayView(
+                            result: manager.trackingResult,
+                            imageSize: CGSize(width: rgbImage.width, height: rgbImage.height)
+                        )
+                    }
+                }
             } else {
                 PlaceholderView(title: "RGB Stream")
             }
@@ -997,6 +1104,8 @@ struct ContentView: View {
         Text(text)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(color.opacity(0.24), in: Capsule())
@@ -1004,6 +1113,7 @@ struct ContentView: View {
                 Capsule().stroke(color.opacity(0.45), lineWidth: 1)
             )
             .help(help ?? text)
+            .animation(nil, value: text)
     }
 
     private func quickActionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -1020,15 +1130,18 @@ struct ContentView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.55))
+                .lineLimit(1)
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                // Fixed height prevents vertical jitter when status strings change length.
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(10)
         .background(panelCardBackground)
+        .animation(nil, value: value)
     }
 
     private var appVersion: String {

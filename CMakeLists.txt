@@ -441,6 +441,10 @@ if(CMAKE_Swift_COMPILER)
         src/swift/KinectManager.swift
         src/swift/ParsingHelpers.swift
         src/swift/PreviewMovieRecorder.swift
+        src/swift/OSCTrackerSender.swift
+        src/swift/TrackingService.swift
+        src/swift/KinectScanner.swift
+        src/swift/PointCloudMerger.swift
     )
     
     set(BRIDGE_SOURCES
@@ -604,6 +608,8 @@ if(CMAKE_Swift_COMPILER)
         "-framework Metal"
         "-framework SystemExtensions"
         "-framework UniformTypeIdentifiers"
+        "-framework Network"
+        "-framework Vision"
     )
 
     target_compile_options(macKinect PRIVATE ${SWIFT_BRIDGE_COMPILE_OPTIONS})

@@ -237,6 +237,19 @@ final class KinectManager: ObservableObject {
     @Published var lastCapturePath = ""
     @Published var lastCapturePointCount = 0
     @Published var scannerBusy = false
+    @Published var trackingEnabled = false
+    @Published var trackingFacesEnabled = true
+    @Published var trackingBodyEnabled = true
+    @Published var trackingOverlayVisible = true
+    @Published var trackingDepthFusionEnabled = true
+    @Published var trackingAllowEstimatedTrackers = false
+    @Published var trackingOSCEnabled = false
+    @Published var trackingOSCHost = "127.0.0.1"
+    @Published var trackingOSCPort = 9000
+    @Published var trackingOSCSendHead = false
+    @Published var trackingOSCStatus = "OSC export off"
+    @Published var trackingResult = VisionTrackingResult.empty
+    @Published var trackingStatus = VisionTrackingResult.empty.message
 
     @Published var stillImageFormat: StillImageFormat = .jpeg
     @Published var stillImageQuality = 0.92
@@ -252,6 +265,8 @@ final class KinectManager: ObservableObject {
     private var videoRecorder: PreviewMovieRecorder?
     private var recordingStreamType: KinectStreamType?
     private var videoRecordStartDate: Date?
+    private let trackingService = VisionTrackingService()
+    private let oscTrackerSender = OSCTrackerSender()
     private var pendingSystemExtensionObserver: SystemExtensionRequestObserver?
     private var startupCompleted = false
     private let systemAudioHalDisplayName = "KinectAudioHAL.driver"
@@ -501,6 +516,47 @@ final class KinectManager: ObservableObject {
         irBrightness = max(1, min(50, value))
         if shouldApplyImageControlFlags {
             bridge?.setIrBrightness(irBrightness)
+        }
+    }
+
+    func setTrackingEnabled(_ value: Bool) {
+        trackingEnabled = value
+        if !value {
+            trackingService.reset()
+            trackingResult = .empty
+            trackingStatus = VisionTrackingResult.empty.message
+        } else {
+            trackingStatus = "Waiting for RGB frame"
+        }
+    }
+
+    func processTrackingFrame(_ image: CGImage, depthData: Data? = nil, width: Int = 0, height: Int = 0) {
+        guard trackingEnabled else { return }
+        let detectFaces = trackingFacesEnabled
+        let detectBody = trackingBodyEnabled
+        let generation = currentDevice?.generation ?? 1
+
+        let depthFrame: TrackingDepthFrame?
+        if let depthData, width > 0, height > 0 {
+            depthFrame = TrackingDepthFrame(data: depthData, width: width, height: height, generation: generation)
+        } else {
+            depthFrame = nil
+        }
+
+        let allowEstimated = trackingAllowEstimatedTrackers
+
+        trackingService.process(
+            image: image,
+            depthFrame: depthFrame,
+            detectFaces: detectFaces,
+            detectBodies: detectBody,
+            allowEstimatedTrackers: allowEstimated
+        ) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, self.trackingEnabled else { return }
+                self.trackingResult = result
+                self.trackingStatus = result.summary
+            }
         }
     }
 
@@ -2247,6 +2303,9 @@ done
         currentDevice = nil
         lastFrame = nil
         lastFrameCaptureDate = nil
+        trackingResult = .empty
+        trackingStatus = trackingEnabled ? "Waiting for RGB frame" : VisionTrackingResult.empty.message
+        trackingService.reset()
         resetCapabilities()
         trace("device", "Cleared device session; closeBridge=\(closeBridge).")
     }
@@ -2309,6 +2368,22 @@ done
             return "Direct Ready"
         }
         return "Unavailable"
+    }
+
+    var ledModeDisplayName: String {
+        Self.ledModeDisplayName(for: ledMode)
+    }
+
+    static func ledModeDisplayName(for mode: Int) -> String {
+        switch mode {
+        case 0: return "Off"
+        case 1: return "Green"
+        case 2: return "Red"
+        case 3: return "Amber"
+        case 4, 5: return "Blink Green"
+        case 6: return "Blink Red/Amber"
+        default: return "Unknown"
+        }
     }
 
     var directMicrophoneSupportDetail: String {
