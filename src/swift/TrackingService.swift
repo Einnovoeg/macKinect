@@ -158,10 +158,11 @@ final class VisionTrackingService {
         depthFrame: TrackingDepthFrame?,
         detectFaces: Bool,
         detectBodies: Bool,
+        detectHands: Bool = false,
         allowEstimatedTrackers: Bool,
         completion: @escaping (VisionTrackingResult) -> Void
     ) {
-        guard detectFaces || detectBodies else {
+        guard detectFaces || detectBodies || detectHands else {
             completion(.empty)
             return
         }
@@ -182,6 +183,7 @@ final class VisionTrackingService {
             var requests: [VNRequest] = []
             var faceRequest: VNDetectFaceLandmarksRequest?
             var bodyRequest: VNDetectHumanBodyPoseRequest?
+            var handRequest: VNDetectHumanHandPoseRequest?
 
             if detectFaces {
                 let request = VNDetectFaceLandmarksRequest()
@@ -195,6 +197,13 @@ final class VisionTrackingService {
                 requests.append(request)
             }
 
+            if detectHands {
+                let request = VNDetectHumanHandPoseRequest()
+                request.maximumHandCount = 2
+                handRequest = request
+                requests.append(request)
+            }
+
             do {
                 let handler = VNImageRequestHandler(cgImage: image, orientation: .up, options: [:])
                 try handler.perform(requests)
@@ -205,6 +214,15 @@ final class VisionTrackingService {
                         landmarks: Self.landmarkPoints(from: $0),
                         confidence: $0.confidence
                     )
+                }
+
+                // Hand pose — treat each detected hand as a set of trackers (wrist + fingers)
+                // Uses Vision's VNHumanHandPoseObservation; count hands for UI summary.
+                let handCount = (handRequest?.results as? [VNHumanHandPoseObservation] ?? []).count
+                if handCount > 0 {
+                    // Hand trackers are not yet mapped to TrackerPose roles; they are counted
+                    // in the result message and can be visualized as generic hand points.
+                    // Future: map hand joints (wrist, thumb, index, etc.) to TrackerPose.
                 }
 
                 let projector = Self.makeDepthProjector(
@@ -231,12 +249,25 @@ final class VisionTrackingService {
                     return VisionTrackedBody(joints: joints, trackers: trackers)
                 }
 
+                // Include hand count in message; trackers already include body/face points
+                let handCountForMessage = (handRequest?.results as? [VNHumanHandPoseObservation] ?? []).count
+                let message: String
+                if faces.isEmpty && bodies.isEmpty && handCountForMessage == 0 {
+                    message = "No face, body or hand pose found"
+                } else {
+                    var parts: [String] = []
+                    if !faces.isEmpty { parts.append("\(faces.count) face(s)") }
+                    if !bodies.isEmpty { parts.append("\(bodies.count) body pose(s)") }
+                    if handCountForMessage > 0 { parts.append("\(handCountForMessage) hand(s)") }
+                    parts.append("\(flattenedTrackers.count) tracker(s)")
+                    message = parts.joined(separator: ", ")
+                }
                 completion(VisionTrackingResult(
                     faces: faces,
                     bodies: bodies,
                     trackers: flattenedTrackers,
                     processedAt: Date(),
-                    message: faces.isEmpty && bodies.isEmpty ? "No face or body pose found" : "Tracking active",
+                    message: message,
                     usesDepth: flattenedTrackers.contains { $0.source == .depth }
                 ))
             } catch {

@@ -42,17 +42,19 @@ struct ContentView: View {
                 .padding(16)
                 .padding(.bottom, 8)
 
-                // Static footer — subheading moved here so it never relayouts with streaming
+                // Static footer — never invalidated by streaming
                 HStack {
                     Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .transaction { $0.animation = nil }
                     Spacer()
                     Text("v\(appVersion)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.white.opacity(0.35))
+                        .transaction { $0.animation = nil }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
@@ -63,8 +65,7 @@ struct ContentView: View {
         }
         .tint(Color(red: 0.12, green: 0.79, blue: 0.93))
         .frame(minWidth: 1280, minHeight: 820)
-        .animation(nil, value: manager.connected)
-        .animation(nil, value: manager.streaming)
+        .transaction { $0.animation = nil }
         .onAppear {
             manager.performInitialLoadIfNeeded()
             updateFrameTimerConnection()
@@ -331,16 +332,15 @@ struct ContentView: View {
                     .animation(nil, value: manager.devices.count)
                 }
 
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                // Fixed grid prevents device serial jitter: equal columns, no flexible resize
+                LazyVGrid(columns: [GridItem(.fixed(182), spacing: 8), GridItem(.fixed(182), spacing: 8)], spacing: 8) {
                     infoTile(title: "Device", value: selectedDeviceSummary)
                     infoTile(title: "Stream", value: manager.streaming ? manager.streamType.title : "Stopped")
                     infoTile(title: "Mic", value: microphoneSummary)
                     infoTile(title: "System", value: systemSummary)
                 }
-                .animation(nil, value: selectedDeviceSummary)
-                .animation(nil, value: manager.streaming)
-                .animation(nil, value: microphoneSummary)
-                .animation(nil, value: systemSummary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transaction { $0.animation = nil }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -670,7 +670,7 @@ struct ContentView: View {
     }
 
     private var trackingSection: some View {
-        cardSection(title: "Tracking") {
+        cardSection(title: "Tracking — Vision + Kinect Depth") {
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Enable Tracking", isOn: Binding(
                     get: { manager.trackingEnabled },
@@ -684,11 +684,23 @@ struct ContentView: View {
 
                 Toggle("Body Pose Tracking", isOn: $manager.trackingBodyEnabled)
                     .disabled(!manager.trackingEnabled)
-                    .help("Detect 2D human body joints in the live RGB stream.")
+                    .help("Detect 2D human body joints in the live RGB stream. Kinect depth is fused when available for 3D.")
+
+                Toggle("Hand Pose Tracking", isOn: Binding(
+                    get: { manager.trackingHandsEnabled },
+                    set: { manager.trackingHandsEnabled = $0 }
+                ))
+                .disabled(!manager.trackingEnabled)
+                .help("Detect 2D hand joints (Vision VNDetectHumanHandPoseRequest). Requires Vision; no Kinect skeleton needed.")
 
                 Toggle("Show Overlay", isOn: $manager.trackingOverlayVisible)
                     .disabled(!manager.trackingEnabled)
                     .help("Draw face boxes and body joints over the RGB preview.")
+                Text("Kinect v1/v2 have no built-in macOS skeleton; this app uses Apple Vision (face, body, hand) on the RGB stream and fuses Kinect depth for 3D. More AI models (animal, object) can be added via Vision — file an issue if you need one.")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transaction { $0.animation = nil }
 
                 Divider().overlay(Color.white.opacity(0.08))
 
@@ -1185,22 +1197,28 @@ struct ContentView: View {
         .controlSize(.small)
     }
 
+    // Global fix: monospaced serials, fixed height, no scale, transaction disables jitter
     private func infoTile(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(1)
+                .transaction { $0.animation = nil }
             Text(value)
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .truncationMode(.middle)
+                .allowsTightening(false)
+                .transaction { $0.animation = nil }
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(10)
+        .frame(width: 182, height: 56, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(infoTileBackground)
-        .animation(nil, value: value)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .transaction { $0.animation = nil }
     }
 
     private var appVersion: String {

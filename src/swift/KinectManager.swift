@@ -242,6 +242,7 @@ final class KinectManager: ObservableObject {
     @Published var trackingEnabled = false
     @Published var trackingFacesEnabled = true
     @Published var trackingBodyEnabled = true
+    @Published var trackingHandsEnabled = false
     @Published var trackingOverlayVisible = true
     @Published var trackingDepthFusionEnabled = true
     @Published var trackingAllowEstimatedTrackers = false
@@ -295,6 +296,7 @@ final class KinectManager: ObservableObject {
     private var lastAudioLevelPublish = Date.distantPast
     private var lastRecordingSecondsPublish = Date.distantPast
     private var lastDiagnosticsPublish = Date.distantPast
+    private var lastTrackingPublish = Date.distantPast
 
     init() {
         bridge = KinectBridge.sharedInstance()
@@ -541,6 +543,7 @@ final class KinectManager: ObservableObject {
         guard trackingEnabled else { return }
         let detectFaces = trackingFacesEnabled
         let detectBody = trackingBodyEnabled
+        let detectHands = trackingHandsEnabled
         let generation = currentDevice?.generation ?? 1
 
         let depthFrame: TrackingDepthFrame?
@@ -552,11 +555,16 @@ final class KinectManager: ObservableObject {
 
         let allowEstimated = trackingAllowEstimatedTrackers
 
+        // Throttle trackingResult to 5Hz to avoid left-panel jitter
+        let now = Date()
+        if now.timeIntervalSince(lastTrackingPublish) < 0.2 { return }
+        lastTrackingPublish = now
         trackingService.process(
             image: image,
             depthFrame: depthFrame,
             detectFaces: detectFaces,
             detectBodies: detectBody,
+            detectHands: detectHands,
             allowEstimatedTrackers: allowEstimated
         ) { [weak self] result in
             DispatchQueue.main.async {
@@ -1944,12 +1952,16 @@ done
 
     private func refreshAudioRuntimeState() {
         let active = bridge?.audioEnabled() ?? false
-        audioStreamActive = active
-        // 1.1.1: throttle audioLevel to 5Hz; show small changes immediately
+        // Only publish when actually changed to prevent 30Hz objectWillChange
+        if audioStreamActive != active {
+            audioStreamActive = active
+        }
         let rawLevel = active ? (bridge?.audioLevel() ?? 0) : 0
         let nowAL = Date()
         if nowAL.timeIntervalSince(lastAudioLevelPublish) > 0.15 || abs(rawLevel - audioLevel) > 0.03 {
-            audioLevel = rawLevel
+            if audioLevel != rawLevel {
+                audioLevel = rawLevel
+            }
             lastAudioLevelPublish = nowAL
         }
         let summary = String(
