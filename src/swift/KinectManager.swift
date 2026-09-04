@@ -279,6 +279,7 @@ final class KinectManager: ObservableObject {
     private let systemAudioHalPath = "/Library/Audio/Plug-Ins/HAL/KinectAudioHAL.driver"
     private let systemCameraPluginPath = "/Library/CoreMediaIO/Plug-Ins/DAL/KinectCameraDAL.plugin"
     private let userAudioHalPath = NSHomeDirectory() + "/Library/Audio/Plug-Ins/HAL/KinectAudioHAL.driver"
+    private let userCameraDalPath = NSHomeDirectory() + "/Library/CoreMediaIO/Plug-Ins/DAL/KinectCameraDAL.plugin"
     private let obsAppBundlePath = "/Applications/OBS.app"
     private let obsUserPluginPath = NSHomeDirectory() + "/Library/Application Support/obs-studio/plugins"
     private let obsSceneCollectionName = "macKinect"
@@ -288,6 +289,10 @@ final class KinectManager: ObservableObject {
     private var lastAudioDebugTrace = ""
     private var lastSystemIntegrationTrace = ""
     private var lastOBSIntegrationTrace = ""
+    // Throttling for high-frequency UI publishers (1.1.1)
+    private var lastAudioLevelPublish = Date.distantPast
+    private var lastRecordingSecondsPublish = Date.distantPast
+    private var lastDiagnosticsPublish = Date.distantPast
 
     init() {
         bridge = KinectBridge.sharedInstance()
@@ -791,10 +796,12 @@ final class KinectManager: ObservableObject {
         let firmwareSourcePath = fileManager.fileExists(atPath: bundledFirmwarePath) ? bundledFirmwarePath : nil
         let signingInfo = Self.currentCodeSigningInfo(bundlePath: Bundle.main.bundlePath)
 
-        if signingInfo?.isAdHoc == true || signingInfo?.authority == nil {
-            systemIntegrationInstallResult = "Install requires a macOS code-signing identity. This app build is ad hoc signed, so CoreAudio and camera plugins would be ignored."
-            refreshSystemIntegrationStatus()
-            return
+        // 1.1.1: ad-hoc builds now proceed with user-domain install + OBS fallback.
+        // System-domain HAL/DAL still prefer Apple identities (macOS 12.3+ ignores ad-hoc in /Library),
+        // but user-domain (~/Library) is attempted and OBS Virtual Camera remains reliable.
+        let isAdHoc = signingInfo?.isAdHoc == true || signingInfo?.authority == nil
+        if isAdHoc {
+            trace("system", "Ad-hoc build — will attempt user-domain install and offer OBS fallback.")
         }
 
         systemIntegrationInstallInProgress = true
@@ -880,8 +887,9 @@ final class KinectManager: ObservableObject {
         let bundledAudioHalAvailable = fileManager.fileExists(atPath: bundledAudioHalPath)
         let bundledCameraDalAvailable = fileManager.fileExists(atPath: bundledCameraDalPath)
         let bundledCameraExtensionAvailable = fileManager.fileExists(atPath: bundledCameraExtensionPath)
-        let installedAudioHalAvailable = fileManager.fileExists(atPath: systemAudioHalPath)
-        let installedCameraPluginAvailable = fileManager.fileExists(atPath: systemCameraPluginPath)
+        // Check both system and user domains for ad-hoc installs (1.1.1: user-domain fallback)
+        let installedAudioHalAvailable = fileManager.fileExists(atPath: systemAudioHalPath) || fileManager.fileExists(atPath: userAudioHalPath)
+        let installedCameraPluginAvailable = fileManager.fileExists(atPath: systemCameraPluginPath) || fileManager.fileExists(atPath: userCameraDalPath)
         let cameraExtensionState = Self.currentSystemExtensionState(identifier: systemCameraExtensionIdentifier)
         let cameraExtensionActivationFailureReason = bundledCameraExtensionAvailable
             ? Self.cameraExtensionActivationFailureReason(
@@ -984,8 +992,9 @@ final class KinectManager: ObservableObject {
             return
         }
 
-        if let audioHalSignatureIssue, !systemMicPublished {
-            systemPublishNote = "Audio HAL is installed but macOS may ignore it because \(audioHalSignatureIssue). Re-run Install Integration from an app build signed with your Apple Developer certificate."
+        // 1.1.1: only fatal if OBS not available as fallback
+        if let audioHalSignatureIssue, !systemMicPublished, !obsInstalled {
+            systemPublishNote = "Audio HAL is installed but macOS may ignore it because \(audioHalSignatureIssue). For ad-hoc builds, use OBS Virtual Camera or install with a valid Apple Developer certificate."
             return
         }
 
@@ -998,8 +1007,8 @@ final class KinectManager: ObservableObject {
             return
         }
 
-        if let cameraDalSignatureIssue, !systemCameraPublished {
-            systemPublishNote = "Camera DAL is installed but macOS may ignore it because \(cameraDalSignatureIssue). Re-run Install Integration from this signed app build."
+        if let cameraDalSignatureIssue, !systemCameraPublished, !obsInstalled {
+            systemPublishNote = "Camera DAL is installed but macOS may ignore it because \(cameraDalSignatureIssue). For ad-hoc builds, the reliable camera path is OBS Virtual Camera (install OBS.app)."
             return
         }
 
@@ -1919,7 +1928,13 @@ done
     private func refreshAudioRuntimeState() {
         let active = bridge?.audioEnabled() ?? false
         audioStreamActive = active
-        audioLevel = active ? (bridge?.audioLevel() ?? 0) : 0
+        // 1.1.1: throttle audioLevel to 5Hz quantized to prevent ScrollView jitter
+        let rawLevel = active ? (bridge?.audioLevel() ?? 0) : 0
+        let nowAL = Date()
+        if nowAL.timeIntervalSince(lastAudioLevelPublish) > 0.2 || abs(rawLevel - audioLevel) > 0.08 {
+            audioLevel = Float((Double(rawLevel) * 10).rounded() / 10)
+            lastAudioLevelPublish = nowAL
+        }
         let summary = String(
             format: "supported=%@ enabled=%@ active=%@ level=%.3f connected=%@ streaming=%@",
             supportsAudioInput.description,
@@ -1997,7 +2012,11 @@ done
 
         if videoRecorder.appendFrame(image) {
             if let videoRecordStartDate {
-                recordingVideoSeconds = Date().timeIntervalSince(videoRecordStartDate)
+                let now = Date()
+                if now.timeIntervalSince(lastRecordingSecondsPublish) > 0.25 {
+                    recordingVideoSeconds = now.timeIntervalSince(videoRecordStartDate)
+                    lastRecordingSecondsPublish = now
+                }
             }
         }
     }
@@ -2406,6 +2425,9 @@ done
         DiagnosticsLogger.shared.log(category: category, message: message)
         let line = "[\(category)] \(message)"
         DispatchQueue.main.async {
+            let now = Date()
+            if now.timeIntervalSince(self.lastDiagnosticsPublish) < 0.33 && self.recentDiagnostics.last == line { return }
+            self.lastDiagnosticsPublish = now
             self.recentDiagnostics.append(line)
             if self.recentDiagnostics.count > 16 {
                 self.recentDiagnostics.removeFirst(self.recentDiagnostics.count - 16)

@@ -2,6 +2,12 @@
 
 All notable changes to `macKinect` are documented in this file.
 
+## 1.1.1 - 2026-09-04
+
+- **UI jitter comprehensive fix:** `ContentView.onReceive` wraps 30Hz updates in `withTransaction(disablesAnimations:true)`; `KinectManager` throttles `audioLevel` (5Hz quantized), `recordingVideoSeconds` (4Hz), `recentDiagnostics` (3Hz); `infoTile`/`header`/`picker` layout already stabilized in 1.1
+- **OBS flipped fix:** `OBSSyphonPublisher.mm:107` now flips CoreGraphics context vertically (`Translate+Scale -1`) before `replaceRegion`, so OBS Virtual Camera receives right-side-up frames
+- **System mic/camera ad-hoc:** `KinectAudioHALPlugin.cpp` firmware search includes `~/Library/Audio/...`; `KinectManager` checks both `/Library` and `~/Library` for HAL/DAL, no longer blocks ad-hoc install, signature warnings now suggest OBS fallback when installed
+
 ## 1.1.0 - 2026-09-03
 
 - **GUI polish:** Fixed left-panel text moving/shrinking when app is open

@@ -100,7 +100,14 @@ constexpr const char *kSyphonServerName = "Kinect Camera";
     return NO;
   }
 
+  // CoreGraphics has origin at bottom-left, Metal at top-left. Flip vertically
+  // so OBS receives right-side-up frames. Without this, the Kinect image
+  // appears upside-down in OBS Virtual Camera.
+  CGContextSaveGState(context);
+  CGContextTranslateCTM(context, 0, height);
+  CGContextScaleCTM(context, 1, -1);
   CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
+  CGContextRestoreGState(context);
   CGContextRelease(context);
 
   MTLRegion region = MTLRegionMake2D(0, 0, width, height);

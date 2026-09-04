@@ -277,6 +277,9 @@ std::string FindFirmwareDirectory() {
   const std::vector<std::string> candidates = {
       "/Library/Audio/Plug-Ins/HAL/KinectAudioHAL.driver/Contents/Resources/libfreenect",
       "/Library/Audio/Plug-Ins/HAL/KinectAudioHAL.driver/Contents/Resources",
+      // User-domain fallback for ad-hoc local installs (1.1.1)
+      std::string(std::getenv("HOME") ? std::string(std::getenv("HOME")) + "/Library/Audio/Plug-Ins/HAL/KinectAudioHAL.driver/Contents/Resources/libfreenect" : ""),
+      std::string(std::getenv("HOME") ? std::string(std::getenv("HOME")) + "/Library/Audio/Plug-Ins/HAL/KinectAudioHAL.driver/Contents/Resources" : ""),
       "/opt/homebrew/share/libfreenect",
       "/usr/local/share/libfreenect",
       "/usr/share/libfreenect",
