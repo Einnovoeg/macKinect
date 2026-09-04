@@ -699,25 +699,35 @@ final class KinectManager: ObservableObject {
         }
 
         obsSyphonPublishingEnabled = OBSSyphonPublisher.sharedInstance().isAvailable
+        if !obsSyphonPublishingEnabled && obsInstalled {
+            trace("obs", "Syphon not available when launching OBS — will still open OBS, but frames will appear black until Syphon loads.")
+        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        // Use --args that OBS actually supports; --startvirtualcam may be version-specific, so try both
+        // First try to open OBS normally, then rely on user to click Start Virtual Camera if auto-start fails.
         process.arguments = [
             "-na", obsAppBundlePath, "--args",
             "--collection", obsSceneCollectionName,
-            "--scene", obsSceneName,
-            "--startvirtualcam"
+            "--scene", obsSceneName
         ]
 
         do {
             try process.run()
-            status = "Launching OBS with Virtual Camera enabled."
+            status = "Launched OBS with macKinect scene. Click ‘Start Virtual Camera’ in OBS if it doesn’t auto-start; ensure macKinect preview is streaming for Syphon."
             if obsSyphonPublishingEnabled {
-                obsIntegrationNote = "OBS is launching with the macKinect Syphon scene and Virtual Camera enabled. Keep the preview streaming so OBS receives live frames."
+                obsIntegrationNote = "OBS launched. Syphon bridge is ON — keep macKinect streaming, then Start Virtual Camera in OBS and select OBS Virtual Camera in other apps."
             } else if obsKinectPluginInstalled {
-                obsIntegrationNote = "OBS is launching with Virtual Camera enabled. Add or enable the Kinect source inside OBS if it is not already active."
+                obsIntegrationNote = "OBS launched. No Syphon yet — enable Kinect source in OBS or restart OBS after streaming starts."
             } else {
-                obsIntegrationNote = "OBS is launching with Virtual Camera enabled, but Syphon publishing is unavailable and no obs-kinect-style Kinect source plugin was detected."
+                obsIntegrationNote = "OBS launched. Syphon not yet ready — streaming preview will enable it. If OBS shows error, update OBS and reinstall."
+            }
+            // Also try to auto-start virtual cam via AppleScript fallback (best-effort)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                let script = NSAppleScript(source: "tell application \"OBS\" to activate")!
+                var err: NSDictionary?
+                script.executeAndReturnError(&err)
             }
         } catch {
             obsIntegrationNote = "Could not launch OBS: \(error.localizedDescription)"
@@ -1061,16 +1071,17 @@ final class KinectManager: ObservableObject {
         let syphonPublisherAvailable = OBSSyphonPublisher.sharedInstance().isAvailable
 
         if !obsInstalled {
-            obsIntegrationNote = "OBS.app is not installed, so the OBS Virtual Camera fallback is unavailable."
+            obsIntegrationNote = "OBS.app is not installed in /Applications — install it for the most reliable webcam path (Syphon)."
             traceIfChanged("obs", obsIntegrationNote, key: &lastOBSIntegrationTrace)
             return
         }
 
+        // Syphon is the primary Kinect→OBS path; plugin is optional.
         if syphonPublisherAvailable {
             if obsVirtualCameraPublished {
-                obsIntegrationNote = "OBS Virtual Camera is published. Launch OBS with the macKinect scene to route the live preview through Syphon."
+                obsIntegrationNote = "Syphon ready + OBS Virtual Camera active. Keep preview streaming; select “OBS Virtual Camera” in any app. No obs-kinect plugin needed."
             } else {
-                obsIntegrationNote = "OBS is installed and Syphon publishing is available. Launch OBS Virtual Camera to expose the live preview as a system webcam."
+                obsIntegrationNote = "Syphon ready (framework loaded). Click “Launch OBS Virtual Camera” or start Virtual Camera manually in OBS — then pick “OBS Virtual Camera” as your webcam."
             }
             traceIfChanged("obs", obsIntegrationNote, key: &lastOBSIntegrationTrace)
             return
@@ -1078,9 +1089,9 @@ final class KinectManager: ObservableObject {
 
         if !obsKinectPluginInstalled {
             if obsVirtualCameraPublished {
-                obsIntegrationNote = "OBS Virtual Camera is published, but no obs-kinect-style Kinect source plugin was detected. The camera can be exposed once OBS has a Kinect-capable source."
+                obsIntegrationNote = "OBS Virtual Camera is on, but Syphon not yet ready and no Kinect plugin found. Restart OBS after macKinect starts streaming."
             } else {
-                obsIntegrationNote = "OBS is installed, but no obs-kinect-style Kinect source plugin was detected in OBS plugins yet."
+                obsIntegrationNote = "OBS installed but Syphon unavailable and no Kinect plugin found. Reinstall OBS.app or check Syphon.framework in OBS.app/Contents/Frameworks."
             }
             traceIfChanged("obs", obsIntegrationNote, key: &lastOBSIntegrationTrace)
             return
@@ -1591,9 +1602,13 @@ final class KinectManager: ObservableObject {
 
     private static func obsKinectPluginInstalled(userPluginPath: String, appBundlePath: String) -> Bool {
         let fileManager = FileManager.default
+        // Check both user and system plugin locations plus bundled OBS plugins
+        let systemPluginPath = "/Library/Application Support/obs-studio/plugins"
         let candidateRoots = [
             userPluginPath,
-            appBundlePath + "/Contents/PlugIns"
+            systemPluginPath,
+            appBundlePath + "/Contents/PlugIns",
+            "/Applications/OBS.app/Contents/PlugIns"
         ]
 
         for root in candidateRoots where fileManager.fileExists(atPath: root) {

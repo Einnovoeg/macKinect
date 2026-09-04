@@ -27,18 +27,39 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             backgroundView
 
-            HStack(alignment: .top, spacing: 16) {
-                controlsPanel
-                    .frame(width: 392)
-                    .fixedSize(horizontal: true, vertical: false)
+            VStack(spacing: 0) {
+                HStack(alignment: .top, spacing: 16) {
+                    controlsPanel
+                        .frame(width: 392)
+                        .fixedSize(horizontal: true, vertical: false)
 
-                previewPanel
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    previewPanel
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(16)
+                .padding(.bottom, 8)
+
+                // Static footer — subheading moved here so it never relayouts with streaming
+                HStack {
+                    Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    Text("v\(appVersion)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.18))
+                .transaction { $0.animation = nil }
             }
-            .padding(16)
         }
         .tint(Color(red: 0.12, green: 0.79, blue: 0.93))
         .frame(minWidth: 1280, minHeight: 820)
@@ -106,18 +127,17 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            Circle()
-                .fill(Color(red: 0.12, green: 0.79, blue: 0.93).opacity(0.12))
-                .frame(width: 480, height: 480)
-                .blur(radius: 30)
-                .offset(x: 420, y: -250)
-
-            Circle()
-                .fill(Color.white.opacity(0.05))
-                .frame(width: 360, height: 360)
-                .blur(radius: 24)
-                .offset(x: -460, y: 280)
+            // Subtle radial glows — no blur squares, clipped to avoid overlap artifacts
+            RadialGradient(colors: [Color(red: 0.12, green: 0.79, blue: 0.93).opacity(0.10), .clear],
+                           center: .topTrailing, startRadius: 80, endRadius: 420)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            RadialGradient(colors: [.white.opacity(0.04), .clear],
+                           center: .bottomLeading, startRadius: 60, endRadius: 360)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
         }
+        .drawingGroup(opaque: false)
     }
 
     private var previewPanel: some View {
@@ -234,16 +254,8 @@ struct ContentView: View {
                                 .foregroundStyle(.white)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .transaction { $0.animation = nil }
-                            // Fixed height + transaction prevents jitter when left panel
-                            // recomputes at 30Hz; the subheading is static and must not relayout.
-                            Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
-                                .font(.callout)
-                                .foregroundStyle(.white.opacity(0.75))
-                                .frame(minHeight: 38, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                                .transaction { $0.animation = nil }
+                                .multilineTextAlignment(.leading)
+                            // Subheading moved to bottom footer for static layout
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .layoutPriority(1)
@@ -1015,12 +1027,21 @@ struct ContentView: View {
         return "Inactive"
     }
 
+    // Separate backgrounds to avoid nested square overlap
     private var panelCardBackground: some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(Color.white.opacity(0.05))
+            .fill(Color.white.opacity(0.06))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+    }
+    private var infoTileBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.white.opacity(0.035))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
             )
     }
 
@@ -1106,19 +1127,25 @@ struct ContentView: View {
                 Text(title)
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.95))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
             }
             content()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
         .background(panelCardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @ViewBuilder
     private func settingSlider<SliderView: View>(label: String, valueText: String, @ViewBuilder slider: () -> SliderView) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(alignment: .center, spacing: 8) {
                 Text(label)
                     .foregroundStyle(.white.opacity(0.8))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
                 Spacer()
                 Text(valueText)
                     .foregroundStyle(.white.opacity(0.7))
@@ -1168,7 +1195,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(10)
-        .background(panelCardBackground)
+        .background(infoTileBackground)
         .animation(nil, value: value)
     }
 
