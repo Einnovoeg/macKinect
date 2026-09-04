@@ -20,8 +20,7 @@ struct ContentView: View {
         case control = "Control"
         case capture = "Capture"
         case tracking = "Tracking"
-        case hardware = "Hardware"
-        case system = "System"
+        case about = "About"
 
         var id: String { rawValue }
     }
@@ -35,12 +34,15 @@ struct ContentView: View {
                     controlsPanel
                         .frame(width: 392)
                         .fixedSize(horizontal: true, vertical: false)
+                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
 
                     previewPanel
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
                 }
                 .padding(16)
                 .padding(.bottom, 8)
+                .transaction { $0.animation = nil; $0.disablesAnimations = true }
 
                 // Static footer — never invalidated by streaming
                 HStack {
@@ -220,6 +222,9 @@ struct ContentView: View {
             headerSummarySection
             sidebarSectionPicker
 
+            // Front-and-center publish + OBS bar (always visible, not in System tab)
+            publishBar
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     switch selectedSidebarSection {
@@ -230,10 +235,8 @@ struct ContentView: View {
                         scannerSection
                     case .tracking:
                         trackingSection
-                    case .hardware:
-                        cameraMotorSection
-                    case .system:
-                        systemIntegrationSection
+                    case .about:
+                        aboutSection
                     }
                 }
                 .padding(.vertical, 2)
@@ -241,6 +244,43 @@ struct ContentView: View {
             .scrollIndicators(.hidden)
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var publishBar: some View {
+        cardSection {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    statusBadge(manager.systemMicPublished ? "Mic Published" : "Mic Off", color: manager.systemMicPublished ? .green : .gray)
+                    statusBadge(manager.systemCameraPublished ? "Cam Published" : "Cam Off", color: manager.systemCameraPublished ? .green : .orange)
+                    statusBadge(manager.obsVirtualCameraPublished ? "OBS On" : "OBS Off", color: manager.obsVirtualCameraPublished ? .green : .gray)
+                    Spacer()
+                }
+                .transaction { $0.animation = nil }
+                Toggle("Publish Kinect to macOS apps", isOn: Binding(get: { manager.publishToSystem }, set: { manager.setSystemPublish($0) }))
+                    .font(.caption)
+                Picker("System Mic", selection: $manager.systemMicMode) {
+                    ForEach(SystemMicMode.allCases) { m in Text(m.title).tag(m) }
+                }.pickerStyle(.segmented).labelsHidden()
+                Button("Launch OBS Virtual Camera") { manager.launchOBSVirtualCamera() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .disabled(!manager.obsInstalled)
+                Text(manager.obsIntegrationNote).font(.caption2).foregroundStyle(.white.opacity(0.6)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var aboutSection: some View {
+        cardSection(title: "About") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("macKinect — native macOS control center for Kinect v1/v2. Live RGB/IR/Depth, capture, 3D scans, Vision tracking → OSC, and system camera/mic via HAL/DAL/Camera Extension or OBS Syphon.")
+                    .font(.caption).foregroundStyle(.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
+                Text("Support: buymeacoffee.com/einnovoeg").font(.caption).foregroundStyle(.white.opacity(0.6))
+                Text("Docs: README, DEPENDENCIES, THIRD_PARTY_NOTICES in the app bundle Documentation folder.").font(.caption2).foregroundStyle(.white.opacity(0.5))
+                Button("Open Settings…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }.buttonStyle(.link).font(.caption)
+            }
+        }
     }
 
     // MARK: - Header Summary (fixed to prevent jitter)
