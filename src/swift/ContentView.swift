@@ -21,6 +21,7 @@ struct ContentView: View {
         case capture = "Capture"
         case tracking = "Tracking"
         case hardware = "Hardware"
+        case system = "System"
 
         var id: String { rawValue }
     }
@@ -231,29 +232,13 @@ struct ContentView: View {
                         trackingSection
                     case .hardware:
                         cameraMotorSection
+                    case .system:
+                        systemIntegrationSection
                     }
                 }
                 .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden)
-            // Footer hint for settings — static, not inside scroll
-            VStack(alignment: .leading, spacing: 4) {
-                Divider().overlay(Color.white.opacity(0.08))
-                HStack(spacing: 6) {
-                    Image(systemName: "gearshape")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.6))
-                    Text("System settings in macKinect Settings (⌘,)")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                    Spacer()
-                    Button("Open…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
-                        .buttonStyle(.link)
-                        .font(.caption2)
-                }
-            }
-            .padding(.top, 8)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
@@ -347,8 +332,6 @@ struct ContentView: View {
                     .animation(nil, value: manager.devices.count)
                 }
 
-                // Use flexible grid with transaction disabled globally to prevent jitter
-                // 392pt - 28pt padding = 364pt available; 2 columns with 8pt spacing => ~178pt each
                 LazyVGrid(columns: [GridItem(.flexible(minimum: 80), spacing: 8), GridItem(.flexible(minimum: 80), spacing: 8)], spacing: 8) {
                     infoTile(title: "Device", value: selectedDeviceSummary)
                     infoTile(title: "Stream", value: manager.streaming ? manager.streamType.title : "Stopped")
@@ -1213,25 +1196,25 @@ struct ContentView: View {
         .controlSize(.small)
     }
 
+    // Global fix: monospaced serials, fixed height, no scale, transaction disables jitter
     private func infoTile(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(1)
-                .multilineTextAlignment(.leading)
                 .transaction { $0.animation = nil }
             Text(value)
-                .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
-                .truncationMode(.tail)
-                .allowsTightening(true)
-                .minimumScaleFactor(0.85)
+                .truncationMode(.middle)
+                .allowsTightening(false)
                 .transaction { $0.animation = nil }
         }
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .padding(10)
+        .frame(width: 182, height: 56, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(infoTileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .transaction { $0.animation = nil }
