@@ -288,19 +288,22 @@ struct ContentView: View {
                             .foregroundStyle(.white.opacity(0.62))
                             .frame(width: 88, alignment: .leading)
                             .fixedSize(horizontal: true, vertical: false)
+                            .transaction { $0.animation = nil }
 
+                        // Static placeholder to avoid dropdown text moving at 30Hz
                         Picker("Quick Device", selection: $manager.selectedDeviceID) {
                             if manager.devices.isEmpty {
                                 Text("No Kinect detected").tag("")
                             }
                             ForEach(manager.devices) { device in
-                                Text("\(device.generationLabel) • \(device.serial)").tag(device.id)
+                                Text(device.generationLabel).tag(device.id)
                             }
                         }
                         .labelsHidden()
                         .frame(minWidth: 0, maxWidth: .infinity)
                         .fixedSize(horizontal: false, vertical: true)
                         .clipped()
+                        .transaction { $0.animation = nil }
                         .help("Choose a Kinect and connect without leaving the summary card.")
 
                         // Shows "Connect" → "Connected" when the selected device is active
@@ -723,7 +726,8 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
 
-                    HStack(spacing: 8) {
+                    // Badges wrap to avoid overflow at 392pt width
+                    FlowBadgeRow {
                         statusBadge(
                             "CamExt \(manager.systemCameraExtensionAvailable ? (manager.systemCameraExtensionActive ? "Active" : (manager.systemCameraExtensionInstalled ? "Installed" : "Bundled")) : "Missing")",
                             color: manager.systemCameraExtensionActive ? .green : (manager.systemCameraExtensionAvailable ? .orange : .gray),
@@ -757,7 +761,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
 
-                    HStack(spacing: 8) {
+                    FlowBadgeRow {
                         statusBadge(
                             "HAL \(manager.systemAudioHalInstalled ? "Installed" : "Missing")",
                             color: manager.systemAudioHalInstalled ? .green : .gray,
@@ -847,7 +851,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.68))
 
-                    HStack(spacing: 8) {
+                    FlowBadgeRow {
                         statusBadge(
                             "OBS \(manager.obsInstalled ? "Installed" : "Missing")",
                             color: manager.obsInstalled ? .green : .gray,
@@ -1244,6 +1248,22 @@ private struct PlaceholderView: View {
                         .font(.title3)
                 }
             )
+    }
+}
+
+// Horizontal wrapping for badges — prevents system tab text misalignment at 392pt
+private struct FlowBadgeRow<Content: View>: View {
+    let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    var body: some View {
+        // Scroll horizontally if overflow, otherwise left-aligned
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .transaction { $0.animation = nil }
     }
 }
 
