@@ -21,7 +21,6 @@ struct ContentView: View {
         case capture = "Capture"
         case tracking = "Tracking"
         case hardware = "Hardware"
-        case system = "System"
 
         var id: String { rawValue }
     }
@@ -232,9 +231,24 @@ struct ContentView: View {
                         trackingSection
                     case .hardware:
                         cameraMotorSection
-                    case .system:
-                        systemIntegrationSection
                     }
+                    // System moved to Settings (Cmd+,) to reduce left-panel clutter
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("System settings moved")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text("Camera/mic routing is now in macKinect Settings (⌘,).")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Open Settings…") {
+                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                    .padding(10)
+                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(.vertical, 2)
             }
@@ -332,8 +346,9 @@ struct ContentView: View {
                     .animation(nil, value: manager.devices.count)
                 }
 
-                // Fixed grid prevents device serial jitter: equal columns, no flexible resize
-                LazyVGrid(columns: [GridItem(.fixed(182), spacing: 8), GridItem(.fixed(182), spacing: 8)], spacing: 8) {
+                // Use flexible grid with transaction disabled globally to prevent jitter
+                // 392pt - 28pt padding = 364pt available; 2 columns with 8pt spacing => ~178pt each
+                LazyVGrid(columns: [GridItem(.flexible(minimum: 80), spacing: 8), GridItem(.flexible(minimum: 80), spacing: 8)], spacing: 8) {
                     infoTile(title: "Device", value: selectedDeviceSummary)
                     infoTile(title: "Stream", value: manager.streaming ? manager.streamType.title : "Stopped")
                     infoTile(title: "Mic", value: microphoneSummary)
@@ -1197,25 +1212,25 @@ struct ContentView: View {
         .controlSize(.small)
     }
 
-    // Global fix: monospaced serials, fixed height, no scale, transaction disables jitter
     private func infoTile(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.55))
                 .lineLimit(1)
+                .multilineTextAlignment(.leading)
                 .transaction { $0.animation = nil }
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
-                .truncationMode(.middle)
-                .allowsTightening(false)
+                .truncationMode(.tail)
+                .allowsTightening(true)
+                .minimumScaleFactor(0.85)
                 .transaction { $0.animation = nil }
         }
-        .frame(width: 182, height: 56, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(10)
         .background(infoTileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .transaction { $0.animation = nil }

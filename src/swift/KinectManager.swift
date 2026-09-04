@@ -1152,7 +1152,7 @@ final class KinectManager: ObservableObject {
                                 "rot": 0.0,
                                 "scale_ref": ["x": 1280.0, "y": 720.0],
                                 "align": 5,
-                                "bounds_type": 2,
+                                "bounds_type": 1,
                                 "bounds_align": 0,
                                 "bounds_crop": false,
                                 "crop_left": 0,
