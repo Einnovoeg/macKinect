@@ -233,11 +233,17 @@ struct ContentView: View {
                                 .font(.system(size: 30, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .transaction { $0.animation = nil }
+                            // Fixed height + transaction prevents jitter when left panel
+                            // recomputes at 30Hz; the subheading is static and must not relayout.
                             Text("Kinect v1/v2 camera, depth, infrared, audio, and scanner control for macOS.")
                                 .font(.callout)
                                 .foregroundStyle(.white.opacity(0.75))
+                                .frame(minHeight: 38, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
-                                .lineLimit(2, reservesSpace: true)
+                                .lineLimit(2)
+                                .truncationMode(.tail)
+                                .transaction { $0.animation = nil }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .layoutPriority(1)
@@ -285,13 +291,26 @@ struct ContentView: View {
                         .clipped()
                         .help("Choose a Kinect and connect without leaving the summary card.")
 
-                        Button("Connect") {
-                            manager.connectSelectedDevice()
+                        // Shows "Connect" → "Connected" when the selected device is active
+                        Group {
+                            if manager.connected && manager.selectedDeviceID == manager.connectedDeviceID {
+                                Button("Connected") {
+                                    manager.disconnect()
+                                }
+                                .buttonStyle(.bordered)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .help("Disconnect the current Kinect session.")
+                            } else {
+                                Button("Connect") {
+                                    manager.connectSelectedDevice()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
+                                .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled.")
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
-                        .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled.")
+                        .animation(nil, value: manager.connected)
                     }
                     .animation(nil, value: manager.selectedDeviceID)
                     .animation(nil, value: manager.devices.count)
@@ -343,10 +362,19 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                             .help("Re-scan USB and backend device lists.")
 
-                        Button("Connect") { manager.connectSelectedDevice() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
-                            .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled because the published route must own the device.")
+                        Group {
+                            if manager.connected && manager.selectedDeviceID == manager.connectedDeviceID {
+                                Button("Disconnect") { manager.disconnect() }
+                                    .buttonStyle(.bordered)
+                                    .help("Close the current Kinect session so system integrations can claim the device.")
+                            } else {
+                                Button("Connect") { manager.connectSelectedDevice() }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(manager.selectedDeviceID.isEmpty || manager.publishToSystem)
+                                    .help("Open the selected Kinect immediately. Disabled while Publish to macOS Apps is enabled because the published route must own the device.")
+                            }
+                        }
+                        .animation(nil, value: manager.connected)
                     }
                 }
 
@@ -814,9 +842,9 @@ struct ContentView: View {
                             help: "Whether OBS.app is installed in /Applications."
                         )
                         statusBadge(
-                            "OBS Plugin \(manager.obsKinectPluginInstalled ? "Detected" : "Missing")",
-                            color: manager.obsKinectPluginInstalled ? .green : .orange,
-                            help: "Whether an OBS plugin capable of receiving Kinect content was detected. This is optional when the Syphon bridge is used."
+                            "OBS Plugin \(manager.obsKinectPluginInstalled ? "Detected" : (manager.obsSyphonPublishingEnabled || manager.obsInstalled ? "Optional" : "Missing"))",
+                            color: (manager.obsKinectPluginInstalled || manager.obsSyphonPublishingEnabled) ? .green : .gray,
+                            help: "Whether an OBS plugin capable of receiving Kinect content was detected. This is optional when the Syphon bridge is used — Syphon is the preferred path."
                         )
                         statusBadge(
                             "Bridge \(manager.obsSyphonPublishingEnabled ? "On" : "Off")",

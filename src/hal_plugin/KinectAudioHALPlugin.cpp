@@ -1120,12 +1120,10 @@ OSStatus STDMETHODCALLTYPE DriverGetPropertyData(AudioServerPlugInDriverRef, Aud
         }
         case kAudioDevicePropertyDeviceIsAlive:
           if (in_data_size < sizeof(UInt32)) return kAudioHardwareBadPropertySizeError;
+          // 1.1.1: keep device alive even when not ready so System Settings doesn't hide it
+          // when the user clicks it. coreaudiod will call StartIO which triggers retry.
 #if KINECT_HAVE_LIBFREENECT
-          {
-            const bool running = gRunningIOClients.load(std::memory_order_acquire) > 0;
-            const bool ready = gMicCaptureReady.load(std::memory_order_acquire);
-            *reinterpret_cast<UInt32 *>(out_data) = (!running || ready) ? 1U : 0U;
-          }
+          *reinterpret_cast<UInt32 *>(out_data) = 1U;
 #else
           *reinterpret_cast<UInt32 *>(out_data) = 0;
 #endif

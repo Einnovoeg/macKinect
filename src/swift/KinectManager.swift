@@ -184,6 +184,8 @@ final class KinectManager: ObservableObject {
     @Published var connected = false
     @Published var streaming = false
     @Published var status = "Idle"
+    /// Stable ID of the currently connected device (empty when disconnected)
+    var connectedDeviceID: String { currentDevice?.id ?? "" }
 
     @Published var streamType: KinectStreamType = .rgb {
         didSet {
@@ -1928,11 +1930,11 @@ done
     private func refreshAudioRuntimeState() {
         let active = bridge?.audioEnabled() ?? false
         audioStreamActive = active
-        // 1.1.1: throttle audioLevel to 5Hz quantized to prevent ScrollView jitter
+        // 1.1.1: throttle audioLevel to 5Hz; show small changes immediately
         let rawLevel = active ? (bridge?.audioLevel() ?? 0) : 0
         let nowAL = Date()
-        if nowAL.timeIntervalSince(lastAudioLevelPublish) > 0.2 || abs(rawLevel - audioLevel) > 0.08 {
-            audioLevel = Float((Double(rawLevel) * 10).rounded() / 10)
+        if nowAL.timeIntervalSince(lastAudioLevelPublish) > 0.15 || abs(rawLevel - audioLevel) > 0.03 {
+            audioLevel = rawLevel
             lastAudioLevelPublish = nowAL
         }
         let summary = String(
