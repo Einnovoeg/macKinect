@@ -232,27 +232,28 @@ struct ContentView: View {
                     case .hardware:
                         cameraMotorSection
                     }
-                    // System moved to Settings (Cmd+,) to reduce left-panel clutter
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("System settings moved")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text("Camera/mic routing is now in macKinect Settings (⌘,).")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.6))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Open Settings…") {
-                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                    }
-                    .padding(10)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(.vertical, 2)
             }
             .scrollIndicators(.hidden)
+            // Footer hint for settings — static, not inside scroll
+            VStack(alignment: .leading, spacing: 4) {
+                Divider().overlay(Color.white.opacity(0.08))
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text("System settings in macKinect Settings (⌘,)")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Open…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+                        .buttonStyle(.link)
+                        .font(.caption2)
+                }
+            }
+            .padding(.top, 8)
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
