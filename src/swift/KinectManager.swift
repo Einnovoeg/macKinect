@@ -713,29 +713,22 @@ final class KinectManager: ObservableObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        // Use --args that OBS actually supports; --startvirtualcam may be version-specific, so try both
-        // First try to open OBS normally, then rely on user to click Start Virtual Camera if auto-start fails.
         process.arguments = [
             "-na", obsAppBundlePath, "--args",
             "--collection", obsSceneCollectionName,
-            "--scene", obsSceneName
+            "--scene", obsSceneName,
+            "--startvirtualcam"
         ]
 
         do {
             try process.run()
-            status = "Launched OBS with macKinect scene. Click ‘Start Virtual Camera’ in OBS if it doesn’t auto-start; ensure macKinect preview is streaming for Syphon."
+            status = "Launching OBS with Virtual Camera enabled."
             if obsSyphonPublishingEnabled {
-                obsIntegrationNote = "OBS launched. Syphon bridge is ON — keep macKinect streaming, then Start Virtual Camera in OBS and select OBS Virtual Camera in other apps."
+                obsIntegrationNote = "OBS is launching with the macKinect Syphon scene and Virtual Camera enabled. Keep the preview streaming so OBS receives live frames."
             } else if obsKinectPluginInstalled {
-                obsIntegrationNote = "OBS launched. No Syphon yet — enable Kinect source in OBS or restart OBS after streaming starts."
+                obsIntegrationNote = "OBS is launching with Virtual Camera enabled. Add or enable the Kinect source inside OBS if it is not already active."
             } else {
-                obsIntegrationNote = "OBS launched. Syphon not yet ready — streaming preview will enable it. If OBS shows error, update OBS and reinstall."
-            }
-            // Also try to auto-start virtual cam via AppleScript fallback (best-effort)
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-                let script = NSAppleScript(source: "tell application \"OBS\" to activate")!
-                var err: NSDictionary?
-                script.executeAndReturnError(&err)
+                obsIntegrationNote = "OBS is launching with Virtual Camera enabled, but Syphon publishing is unavailable and no obs-kinect-style Kinect source plugin was detected."
             }
         } catch {
             obsIntegrationNote = "Could not launch OBS: \(error.localizedDescription)"
@@ -1150,7 +1143,7 @@ final class KinectManager: ObservableObject {
                                 "visible": true,
                                 "locked": false,
                                 "rot": 0.0,
-                                "scale_ref": ["x": 1280.0, "y": 720.0],
+                                "scale_ref": ["x": 1920.0, "y": 1080.0],
                                 "align": 5,
                                 "bounds_type": 2,
                                 "bounds_align": 0,
@@ -1161,11 +1154,11 @@ final class KinectManager: ObservableObject {
                                 "crop_bottom": 0,
                                 "id": 1,
                                 "group_item_backup": false,
-                                "pos": ["x": 640.0, "y": 360.0],
+                                "pos": ["x": 960.0, "y": 540.0],
                                 "pos_rel": ["x": 0.5, "y": 0.5],
                                 "scale": ["x": 1.0, "y": 1.0],
                                 "scale_rel": ["x": 1.0, "y": 1.0],
-                                "bounds": ["x": 1280.0, "y": 720.0],
+                                "bounds": ["x": 1920.0, "y": 1080.0],
                                 "bounds_rel": ["x": 1.0, "y": 1.0],
                                 "scale_filter": "disable",
                                 "blend_method": "default",

@@ -20,7 +20,8 @@ struct ContentView: View {
         case control = "Control"
         case capture = "Capture"
         case tracking = "Tracking"
-        case about = "About"
+        case hardware = "Hardware"
+        case system = "System"
 
         var id: String { rawValue }
     }
@@ -34,15 +35,12 @@ struct ContentView: View {
                     controlsPanel
                         .frame(width: 392)
                         .fixedSize(horizontal: true, vertical: false)
-                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
 
                     previewPanel
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
                 }
                 .padding(16)
                 .padding(.bottom, 8)
-                .transaction { $0.animation = nil; $0.disablesAnimations = true }
 
                 // Static footer — never invalidated by streaming
                 HStack {
@@ -222,8 +220,11 @@ struct ContentView: View {
             headerSummarySection
             sidebarSectionPicker
 
-            // Front-and-center publish + OBS bar (always visible, not in System tab)
-            publishBar
+            // Prominent OBS + Mic in Control tab — always visible, not scrolled away
+            if selectedSidebarSection == .control {
+                obsProminentCard
+                micProminentCard
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -235,8 +236,10 @@ struct ContentView: View {
                         scannerSection
                     case .tracking:
                         trackingSection
-                    case .about:
-                        aboutSection
+                    case .hardware:
+                        cameraMotorSection
+                    case .system:
+                        systemIntegrationSection
                     }
                 }
                 .padding(.vertical, 2)
@@ -246,41 +249,89 @@ struct ContentView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private var publishBar: some View {
+    private var obsProminentCard: some View {
         cardSection {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    statusBadge(manager.systemMicPublished ? "Mic Published" : "Mic Off", color: manager.systemMicPublished ? .green : .gray)
-                    statusBadge(manager.systemCameraPublished ? "Cam Published" : "Cam Off", color: manager.systemCameraPublished ? .green : .orange)
-                    statusBadge(manager.obsVirtualCameraPublished ? "OBS On" : "OBS Off", color: manager.obsVirtualCameraPublished ? .green : .gray)
+                    Image(systemName: "video.badge.ellipsis")
+                        .foregroundStyle(Color(red: 0.12, green: 0.79, blue: 0.93))
+                    Text("OBS Virtual Camera")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.95))
                     Spacer()
+                    statusBadge(manager.obsVirtualCameraPublished ? "On" : "Off",
+                               color: manager.obsVirtualCameraPublished ? .green : .gray)
+                        .fixedSize()
                 }
-                .transaction { $0.animation = nil }
-                Toggle("Publish Kinect to macOS apps", isOn: Binding(get: { manager.publishToSystem }, set: { manager.setSystemPublish($0) }))
+                Text("Streams the complete frame via Syphon. Keep preview streaming.")
                     .font(.caption)
-                Picker("System Mic", selection: $manager.systemMicMode) {
-                    ForEach(SystemMicMode.allCases) { m in Text(m.title).tag(m) }
-                }.pickerStyle(.segmented).labelsHidden()
-                Button("Launch OBS Virtual Camera") { manager.launchOBSVirtualCamera() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .disabled(!manager.obsInstalled)
-                Text(manager.obsIntegrationNote).font(.caption2).foregroundStyle(.white.opacity(0.6)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .fixedSize(horizontal: false, vertical: true)
+                FlowBadgeRow {
+                    statusBadge("OBS \(manager.obsInstalled ? "Installed" : "Missing")",
+                               color: manager.obsInstalled ? .green : .gray)
+                    statusBadge("Bridge \(manager.obsSyphonPublishingEnabled ? "On" : "Off")",
+                               color: manager.obsSyphonPublishingEnabled ? .green : .orange)
+                }
+                Button {
+                    deferOnMain { manager.launchOBSVirtualCamera() }
+                } label: {
+                    Label("Launch OBS Virtual Camera", systemImage: "arrow.up.forward.app")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .frame(maxWidth: .infinity)
+                .disabled(!manager.obsInstalled)
+                .help("Launch OBS with the macKinect Syphon scene and start Virtual Camera. The OBS scene is centered at 1920×1080 with scale-inner so the complete frame is visible.")
+                Text(manager.obsIntegrationNote)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .transaction { $0.animation = nil }
     }
 
-    private var aboutSection: some View {
-        cardSection(title: "About") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("macKinect — native macOS control center for Kinect v1/v2. Live RGB/IR/Depth, capture, 3D scans, Vision tracking → OSC, and system camera/mic via HAL/DAL/Camera Extension or OBS Syphon.")
-                    .font(.caption).foregroundStyle(.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
-                Text("Support: buymeacoffee.com/einnovoeg").font(.caption).foregroundStyle(.white.opacity(0.6))
-                Text("Docs: README, DEPENDENCIES, THIRD_PARTY_NOTICES in the app bundle Documentation folder.").font(.caption2).foregroundStyle(.white.opacity(0.5))
-                Button("Open Settings…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }.buttonStyle(.link).font(.caption)
+    private var micProminentCard: some View {
+        cardSection {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "mic.fill")
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text("Microphone")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.95))
+                    Spacer()
+                    statusBadge(manager.audioStreamActive ? "Active" : (manager.audioEnabled ? "Armed" : "Off"),
+                               color: manager.audioStreamActive ? .green : .gray)
+                        .fixedSize()
+                }
+                Toggle("Use Kinect microphone inside macKinect", isOn: Binding(
+                    get: { manager.audioEnabled },
+                    set: { manager.setAudioEnabled($0) }
+                ))
+                .font(.caption)
+                .help("Starts the direct Kinect microphone backend inside macKinect. Moved from Hardware for quicker access.")
+                HStack(spacing: 8) {
+                    Text("Level")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.6))
+                    ProgressView(value: min(max(Double(manager.audioLevel), 0), 1))
+                        .frame(maxWidth: .infinity)
+                    Text(String(format: "%.2f", manager.audioLevel))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 36, alignment: .trailing)
+                }
+                Text(manager.directMicrophoneSupportDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .transaction { $0.animation = nil }
     }
 
     // MARK: - Header Summary (fixed to prevent jitter)
@@ -620,53 +671,10 @@ struct ContentView: View {
                 }
 
                 Divider().overlay(Color.white.opacity(0.08))
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Microphone")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-
-                    Text("Direct Kinect microphone capture used inside macKinect. This is device-level control, so it sits with the rest of the hardware settings.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.65))
-
-                    Text("Direct mic and Publish to macOS Apps are mutually exclusive on the current backend. If you publish the Kinect to other apps, macKinect releases the live device session first.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.55))
-
-                    HStack(spacing: 8) {
-                        statusBadge(
-                            "Direct Mic \(manager.unifiedMicrophoneStatus)",
-                            color: manager.audioStreamActive ? .green : (manager.supportsAudioInput ? .orange : .gray),
-                            help: manager.directMicrophoneSupportDetail
-                        )
-                    }
-
-                    Toggle("Use Kinect microphone inside macKinect", isOn: Binding(
-                        get: { manager.audioEnabled },
-                        set: { manager.setAudioEnabled($0) }
-                    ))
-                     .help("Starts the direct Kinect microphone backend inside macKinect. This does not publish a microphone to other apps.")
-
-
-                    Text(manager.directMicrophoneSupportDetail)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.65))
-
-                    HStack {
-                        Text("Input level")
-                            .foregroundStyle(.white.opacity(0.8))
-                            .help("Live level meter for the direct macKinect microphone path only.")
-                        ProgressView(value: min(max(Double(manager.audioLevel), 0), 1))
-                            .frame(maxWidth: .infinity)
-                            .help("Shows the current direct-input amplitude from the Kinect microphone path.")
-                        Text(String(format: "%.2f", manager.audioLevel))
-                            .monospacedDigit()
-                            .frame(width: 50, alignment: .trailing)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .help("Current direct-input level as a normalized scalar.")
-                    }
-                }
+                Text("Microphone control moved to Control Center for quicker access.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -941,59 +949,43 @@ struct ContentView: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    Button(manager.systemIntegrationInstallInProgress ? "Installing..." : "Install Integration") {
-                        deferOnMain {
-                            manager.installSystemIntegration()
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Button(manager.systemIntegrationInstallInProgress ? "Installing..." : "Install Integration") {
+                            deferOnMain { manager.installSystemIntegration() }
                         }
-                    }
-                     .buttonStyle(.borderedProminent)
-                     .help("Install or reinstall the bundled system microphone driver and camera integration components.")
-
-
-                    Button(manager.systemPreferenceApplyInProgress ? "Applying..." : "Apply System Settings") {
-                        deferOnMain {
-                            manager.applySystemIntegrationPreferences()
+                        .buttonStyle(.borderedProminent)
+                        .help("Install or reinstall the bundled system microphone driver and camera integration components.")
+                        Button("Re-check") {
+                            deferOnMain { manager.refreshSystemIntegrationStatus() }
                         }
+                        .buttonStyle(.bordered)
+                        .help("Refresh the published-device checks without reinstalling anything.")
                     }
-                     .buttonStyle(.bordered)
-                     .help("Write the selected system camera/microphone settings into the shared macOS preferences domain so the HAL and camera extension can see them.")
-
-
-                    Button("Re-check") {
-                        deferOnMain {
-                            manager.refreshSystemIntegrationStatus()
+                    HStack(spacing: 8) {
+                        Button(manager.systemPreferenceApplyInProgress ? "Applying..." : "Apply System Settings") {
+                            deferOnMain { manager.applySystemIntegrationPreferences() }
                         }
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Refresh the published-device checks without reinstalling anything.")
-
-                    Button("Release Hardware") {
-                        deferOnMain {
-                            manager.releaseHardwareForSystemIntegration()
+                        .buttonStyle(.bordered)
+                        .help("Write the selected system camera/microphone settings into the shared macOS preferences domain so the HAL and camera extension can see them.")
+                        Button("Release Hardware") {
+                            deferOnMain { manager.releaseHardwareForSystemIntegration() }
                         }
+                        .buttonStyle(.bordered)
+                        .help("Close the current Kinect session so system integrations or OBS can claim the device.")
                     }
-                     .buttonStyle(.bordered)
-                     .help("Close the current Kinect session so system integrations or OBS can claim the device.")
-
                 }
 
-                HStack(spacing: 8) {
-                    Button("Launch OBS Virtual Camera") {
-                        deferOnMain {
-                            manager.launchOBSVirtualCamera()
-                        }
-                    }
-                     .buttonStyle(.bordered)
-                     .help("Launch OBS and request its Virtual Camera output. This is the practical fallback camera path on current macOS.")
-
-
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("OBS Virtual Camera is now in Control Center for quicker access. The button below opens the plugins folder.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
                     Button("Open OBS Plugins") {
                         revealPath(manager.obsPluginsFolderPath)
                     }
-                     .buttonStyle(.bordered)
-                     .help("Open the user OBS plugins folder where an obs-kinect-style source plugin can be installed.")
-
+                    .buttonStyle(.bordered)
+                    .help("Open the user OBS plugins folder where an obs-kinect-style source plugin can be installed.")
                 }
 
                 Text(manager.systemPublishNote)
@@ -1252,7 +1244,7 @@ struct ContentView: View {
                 .allowsTightening(false)
                 .transaction { $0.animation = nil }
         }
-        .frame(width: 182, height: 56, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(infoTileBackground)

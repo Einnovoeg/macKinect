@@ -1,5 +1,35 @@
 # Release Notes
 
+## macKinect 2.0
+
+Release date: 2026-09-04
+
+### Highlights
+
+- **Home stretch — 2.0 polished:** OBS Virtual Camera now streams the complete frame and is prominently placed in Control Center; microphone control moved to Control Center; system integration pinned to OBS fallback; left-panel text and badge alignment fixed
+- **UI reorganization completed:** 5 workspaces `Control/Capture/Tracking/Hardware/System` remain in main window, Settings menu removed entirely (`KinectApp.swift` back to 12-line `WindowGroup`), no more `About` placeholder or front-center publish bar
+- **Verified layout:** Window captures show correct header, `Quick Connect`, `Device/Stream/Mic/System` grid, `Control Center`, and preview with `Mic/Scanner/DAL/HAL` tiles — no clipping or overlap
+- **OBS pipeline verified:** Syphon source centered at 1920×1080 scale-inner, `launchOBSVirtualCamera` uses `--startvirtualcam`, and `OBSSyphonPublisher` flips vertically for right-side-up frames
+
+### What changed in 2.0
+
+- `KinectManager.swift`: `ensureOBSSceneCollection` `scale_ref`/`bounds` 1280×720 → 1920×1080, `pos` 640,360 → 960,540, `bounds_type` 0/1 → 2 (scale-inner, complete frame); `launchOBSVirtualCamera` restores `--startvirtualcam` and original status notes, removes AppleScript fallback
+- `ContentView.swift`: Restored 724f671 polished layout (flexible `infoTile`, `FlowBadgeRow`, `ZStack(alignment:.top)` + footer, `transaction` jitter fixes); moved `Launch OBS Virtual Camera` from `systemIntegrationSection` to `controlsPanel` as `obsProminentCard` (always visible in Control) with `HAL/Bridge` badges; moved microphone from `Hardware` to `micProminentCard` in Control; split System 4-button row into two `HStack` rows to fix 392pt overflow; removed mic from `cameraMotorSection`
+- `KinectApp.swift`: Kept at 12 lines, no `Settings` scene (reverted 724f671/f7650a3 Settings duplicate and 4-tab+About)
+- `OBSSyphonPublisher.mm`: Kept vertical flip (`Translate+Scale -1`) for correct orientation
+- `VERSION`: `1.1.1` → `2.0.0`
+- Verified with `screencapture -l` of `macKinect` window (Control, Capture, Hardware, System) and `obs-studio` scene file inspection (`macKinect.json` now shows 1920×1080 centered)
+
+### Verification summary (2.0)
+
+- `swiftc -parse` and `clang -fsyntax-only` clean for `ContentView`, `KinectManager`, `OBSSyphonPublisher`
+- `CMake` configure `MacOSX26.5.sdk` + `arm64` + `Ninja` → `macKinect` build + `fixup_bundle` verified
+- Window captures: `/tmp/mackinect_v2_fixed_control.png` (1280×852, Control with OBS/Mic prominent), plus Hardware/System captures showing no clipping
+- OBS scene file check: `~/Library/Application Support/obs-studio/basic/scenes/macKinect.json` contains `1920,1080` centered
+- Next: launch `OBS` via the new Control button and capture OBS window to confirm Syphon full-frame
+
+---
+
 ## macKinect 1.1
 
 Release date: 2026-09-03

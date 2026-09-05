@@ -2,6 +2,20 @@
 
 All notable changes to `macKinect` are documented in this file.
 
+## 2.0.0 - 2026-09-04
+
+- **Home stretch polish for 2.0:** Completed UI reorganization and system integration pinning for final release
+  - **OBS full-frame:** `KinectManager.ensureOBSSceneCollection` now centers Syphon source at 1920×1080 `bounds_type:2` (scale-inner, complete frame) with `pos 960,540`; `launchOBSVirtualCamera` restores `--startvirtualcam` so OBS auto-starts Virtual Camera; `OBSSyphonPublisher.mm` flip keeps image right-side-up
+  - **Control tab prominence:** Moved `Launch OBS Virtual Camera` from System (`systemIntegrationSection`) to Control Center as a `cardSection` with icon, `HAL/Bridge` badges, and `borderedProminent` button; added `obsProminentCard` + `micProminentCard` outside `ScrollView` so they are always visible without scrolling
+  - **Microphone:** Moved direct mic toggle + level meter from `Hardware` (`cameraMotorSection`) to Control Center (`micProminentCard`); Hardware now shows “Microphone control moved to Control Center” note
+  - **UI alignment:** Fixed left-edge clipping and badge overflow that caused `nacKinect`/`ontrol` truncation in System/Hardware tabs
+    - `infoTile` now uses `maxWidth:.infinity` flexible width (was `width:182` fixed, overflowed at 392pt); `LazyVGrid` remains `flexible(minimum:80)` with `transaction(nil)`
+    - `FlowBadgeRow` already wraps badges horizontally; `systemIntegrationSection` 4-button `HStack` split into two `HStack` rows inside `VStack` to avoid 392pt overflow
+    - `controlsPanel` now has `headerSummarySection` + `sidebarSectionPicker` + `obsProminentCard`/`micProminentCard` fixed above `ScrollView`, preventing header overlap on tall System content
+    - Verified with window captures (`/tmp/mackinect_v2_fixed_control.png`): 5 tabs `Control/Capture/Tracking/Hardware/System`, no Settings menu, correct header, quick-connect, grid, and bottom preview tiles
+- **Layout verification:** Relaunched `/tmp/build-v2` app and captured `macKinect` window (1280×852) via `screencapture -l`; confirmed no clipping, complete frame in OBS via 1920×1080 scene, and prominent Control buttons
+- **Build:** Verified `CMake` configure with `MacOSX26.5.sdk` + `arm64` + `Ninja` and `macKinect` build; `VERSION` bumped to `2.0.0`
+
 ## 1.1.1 - 2026-09-04
 
 - **UI jitter comprehensive fix:** `ContentView.onReceive` wraps 30Hz updates in `withTransaction(disablesAnimations:true)`; `KinectManager` throttles `audioLevel` (5Hz quantized), `recordingVideoSeconds` (4Hz), `recentDiagnostics` (3Hz); `infoTile`/`header`/`picker` layout already stabilized in 1.1
