@@ -33,18 +33,15 @@ These third-party source trees can be checked out locally and used directly by t
 
 ```bash
 # Recommended shared location:
-/Volumes/Mac\ Stick/Library/kinect-deps/libfreenect
-/Volumes/Mac\ Stick/Library/kinect-deps/libfreenect2
-```
-
-The repo contains symlinks `libfreenect -> /Volumes/Mac Stick/Library/kinect-deps/libfreenect` and `libfreenect2 -> /Volumes/Mac Stick/Library/kinect-deps/libfreenect2` already ignored by git. Their license obligations are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Place libfreenect and libfreenect2 checkouts in a directory outside the repo.
+Their license obligations are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 If you keep those local source trees in a shared library location outside the repo, pass their paths into CMake:
 
 ```bash
 cmake -S . -B build-control-center -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DLIBFREENECT_ROOT=/Volumes/Mac\ Stick/Library/kinect-deps/libfreenect \
-  -DKINECT_LIBFREENECT2_ROOT=/Volumes/Mac\ Stick/Library/kinect-deps/libfreenect2
+  -DLIBFREENECT_ROOT=/path/to/libfreenect \
+  -DKINECT_LIBFREENECT2_ROOT=/path/to/libfreenect2
 ```
 
 ## Optional Runtime Dependencies

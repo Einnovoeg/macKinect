@@ -92,13 +92,12 @@ cmake --build build-control-center --target macKinect -j4
 Shared library location (recommended for reusable deps):
 
 ```bash
-# Library files used by multiple apps should live in a centralized location:
-# /Volumes/Mac Stick/Library/kinect-deps/
-# The repo already symlinks libfreenect/libfreenect2 there.
-# Pass explicit roots if your checkouts live elsewhere:
+# Library files used by multiple apps can live in a centralized location.
+# Place libfreenect and libfreenect2 checkouts wherever convenient and pass
+# explicit roots to CMake if they are not on the default search path:
 cmake -S . -B build-control-center -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DLIBFREENECT_ROOT=/Volumes/Mac\ Stick/Library/kinect-deps/libfreenect \
-  -DKINECT_LIBFREENECT2_ROOT=/Volumes/Mac\ Stick/Library/kinect-deps/libfreenect2
+  -DLIBFREENECT_ROOT=/path/to/libfreenect \
+  -DKINECT_LIBFREENECT2_ROOT=/path/to/libfreenect2
 ```
 
 ### Launch the app

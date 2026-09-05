@@ -1144,7 +1144,7 @@ final class KinectManager: ObservableObject {
                                 "locked": false,
                                 "rot": 0.0,
                                 "scale_ref": ["x": 1920.0, "y": 1080.0],
-                                "align": 5,
+                                "align": 4,
                                 "bounds_type": 2,
                                 "bounds_align": 0,
                                 "bounds_crop": false,
