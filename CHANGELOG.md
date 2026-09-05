@@ -2,58 +2,40 @@
 
 All notable changes to `macKinect` are documented in this file.
 
-## 2.0.0 - 2026-09-04
+## 2.0.0 - 2026-09-05
 
-- **Home stretch polish for 2.0:** Completed UI reorganization and system integration pinning for final release
-  - **OBS full-frame:** `KinectManager.ensureOBSSceneCollection` now centers Syphon source at 1920×1080 `bounds_type:2` (scale-inner, complete frame) with `pos 960,540`; `launchOBSVirtualCamera` restores `--startvirtualcam` so OBS auto-starts Virtual Camera; `OBSSyphonPublisher.mm` flip keeps image right-side-up
-  - **Control tab prominence:** Moved `Launch OBS Virtual Camera` from System (`systemIntegrationSection`) to Control Center as a `cardSection` with icon, `HAL/Bridge` badges, and `borderedProminent` button; added `obsProminentCard` + `micProminentCard` outside `ScrollView` so they are always visible without scrolling
-  - **Microphone:** Moved direct mic toggle + level meter from `Hardware` (`cameraMotorSection`) to Control Center (`micProminentCard`); Hardware now shows “Microphone control moved to Control Center” note
-  - **UI alignment:** Fixed left-edge clipping and badge overflow that caused `nacKinect`/`ontrol` truncation in System/Hardware tabs
-    - `infoTile` now uses `maxWidth:.infinity` flexible width (was `width:182` fixed, overflowed at 392pt); `LazyVGrid` remains `flexible(minimum:80)` with `transaction(nil)`
-    - `FlowBadgeRow` already wraps badges horizontally; `systemIntegrationSection` 4-button `HStack` split into two `HStack` rows inside `VStack` to avoid 392pt overflow
-    - `controlsPanel` now has `headerSummarySection` + `sidebarSectionPicker` + `obsProminentCard`/`micProminentCard` fixed above `ScrollView`, preventing header overlap on tall System content
-    - Verified with window captures (`/tmp/mackinect_v2_fixed_control.png`): 5 tabs `Control/Capture/Tracking/Hardware/System`, no Settings menu, correct header, quick-connect, grid, and bottom preview tiles
-- **Layout verification:** Relaunched `/tmp/build-v2` app and captured `macKinect` window (1280×852) via `screencapture -l`; confirmed no clipping, complete frame in OBS via 1920×1080 scene, and prominent Control buttons
-- **Build:** Verified `CMake` configure with `MacOSX26.5.sdk` + `arm64` + `Ninja` and `macKinect` build; `VERSION` bumped to `2.0.0`
+- **OBS full-frame streaming:** `ensureOBSSceneCollection` now uses 1920×1080 scale-inner (bounds_type:2) so the complete Kinect frame streams to OBS Virtual Camera without crop; `launchOBSVirtualCamera` uses `--startvirtualcam` for auto-start
+- **Control Center prominence:** `Launch OBS Virtual Camera` moved from System to Control tab as always-visible `cardSection` with badges; microphone toggle moved from Hardware to Control with level meter; System 4-button row split into two rows to prevent overflow
+- **UI alignment:** `infoTile` width changed from fixed `182` to `maxWidth:.infinity` to prevent left-edge clipping; `FlowBadgeRow` wraps badges; System hardware row split into two `HStack` rows
+- **No Settings menu:** Reverted to 12-line `WindowGroup`; `KinectApp.swift` has no duplicate Settings scene
 
-## 1.1.1 - 2026-09-04
+## 1.1.1 - 2026-09-03
 
-- **UI jitter comprehensive fix:** `ContentView.onReceive` wraps 30Hz updates in `withTransaction(disablesAnimations:true)`; `KinectManager` throttles `audioLevel` (5Hz quantized), `recordingVideoSeconds` (4Hz), `recentDiagnostics` (3Hz); `infoTile`/`header`/`picker` layout already stabilized in 1.1
-- **OBS flipped fix:** `OBSSyphonPublisher.mm:107` now flips CoreGraphics context vertically (`Translate+Scale -1`) before `replaceRegion`, so OBS Virtual Camera receives right-side-up frames
-- **System mic/camera ad-hoc:** `KinectAudioHALPlugin.cpp` firmware search includes `~/Library/Audio/...`; `KinectManager` checks both `/Library` and `~/Library` for HAL/DAL, no longer blocks ad-hoc install, signature warnings now suggest OBS fallback when installed
+- **OBS flipped fix:** `OBSSyphonPublisher.mm` now flips CoreGraphics context vertically before `replaceRegion` so OBS Virtual Camera receives right-side-up frames
+- **System mic/camera ad-hoc:** Audio HAL and camera DAL search both `/Library` and `~/Library`; ad-hoc builds no longer blocked; signature warnings suggest OBS fallback
+- **UI jitter comprehensive fix:** 30Hz throttling for audio/recording/diagnostics; `infoTile`/`header`/`picker` layout stabilized with `animation(nil)` and `lineLimit` fixes
 
 ## 1.1.0 - 2026-09-03
 
-- **GUI polish:** Fixed left-panel text moving/shrinking when app is open
-  - Removed `minimumScaleFactor(0.8)` from `infoTile`; fixed tile height 44 with `lineLimit(1)` + truncation + `animation(nil)`
-  - Fixed `headerSummarySection` HStack with `fixedSize` + `lineLimit(2,reservesSpace:true)` + `layoutPriority(1)`
-  - Stabilized `Quick Connect` picker with explicit width 88, `clipped()`, `fixedSize`; disabled implicit animations for `status`, badges, `LazyVGrid`
-  - Added `MARK` comments explaining jitter prevention in `ContentView.swift:174,200`
-  - Deleted stale `ContentView.swift.bak*` artifacts
-- **3D scan registration:** Replaced centroid-only fallback with full ICP in `PointCloudMerger.swift` (50 iterations, SVD via power iteration, KD-tree, centroid pre-align fallback); added stochastic sampling support and convergence tolerance tuning
-- **Kinect v1 stability:** Resolved `libusb_control_transfer` null-handle crash by excluding `FREENECT_DEVICE_MOTOR` from `freenect_select_subdevices()`; fixed `freenect_start_audio` abort by claiming `FREENECT_DEVICE_AUDIO` subdevice
-- **Image controls:** Enabled Mirror, Auto Exposure, Auto White Balance, Near Mode, Manual Exposure, IR Brightness for Kinect v1 (`KinectManager.swift:shouldApplyImageControlFlags = currentDevice != nil`); implemented v2 overrides in `freenect_v2_backend.cpp`
-- **Vision tracking:** Apple Vision face/body pipeline with depth-fusion to 3D meter-space, overlay rendering on RGB+IR, Tracking workspace, VRChat OSC export (`TrackingService.swift`, `OSCTrackerSender.swift`)
-- **Scanner refactoring:** Extracted `KinectScanner.swift` for capture orchestration; added multi-format export (PLY ASCII/Binary, OBJ, XYZ)
-- **Code clarity:** Added detailed coordinator docs for `KinectManager` and `SystemExtensionRequestObserver`; documented security model (`shellQuote` + `mktemp` + `codesign --verify` before `ditto` + `trap cleanup`)
-- **PII & hygiene:** Redacted team ID email from `session-e808ea68.md`; verified no hardcoded `/Users/` or secrets in first-party sources; `AGENTS.md`/`session*.md`/`.kiro/` excluded via `.gitignore`; added `Kinect/` to ignore (vendored OpenNI ~146M)
-- **Docs:** Rewrote `README.md` (ICP, tracking, layout fix, centralized library `/Volumes/Mac Stick/Library/kinect-deps` example); updated `DEPENDENCIES.md` (shared-deps path, OBS/Vision/OSC, signing requirements); updated `.gitignore` (explicit `Kinect/`, icon backups)
-- **Library centralization:** Reusable deps remain in `/Volumes/Mac Stick/Library/kinect-deps` (`libfreenect`, `libfreenect2`), symlinked and gitignored
-- **Build:** Verified `CMake` configure + `macKinect` build + CLI smoke tests (`--help`, `--version`, `--list`, `--integration-status`) via `run-test.sh`; centralized lib roots auto-respected by CMake
-- **Release:** Bumped `VERSION` to 1.1.0; kept v1.0.0 artifacts; prepared for v1.1 GitHub release
+- **GUI polish:** Left-panel text jitter fixed; `infoTile` height 44, `lineLimit(1)` + truncation, `animation(nil)` disabled
+- **3D scan registration:** Full ICP registration (50 iterations, SVD via power iteration, KD-tree, centroid pre-align fallback); stochastic sampling and convergence tolerance
+- **Kinect v1 stability:** Excluded `FREENECT_DEVICE_MOTOR` from `freenect_select_subdevices()` to prevent libusb control transfer crash; claimed `FREENECT_DEVICE_AUDIO` subdevice to fix audio startup
+- **Image controls:** Mirror, Auto Exposure, Auto White Balance, Near Mode, Manual Exposure, IR Brightness enabled for Kinect v1 and v2
+- **Vision tracking:** Apple Vision face/body pipeline with depth-fusion to 3D meter-space, overlay, Tracking workspace, VRChat OSC export
+- **Scanner refactoring:** Extracted `KinectScanner.swift`; multi-format export (PLY, OBJ, XYZ)
+- **Code clarity:** Coordinator docs for `KinectManager` and `SystemExtensionRequestObserver`; security model documented (`shellQuote` + `mktemp` + `codesign --verify` before `ditto` + `trap cleanup`)
+- **PII & hygiene:** No hardcoded `/Users/` or secrets in first-party sources; `AGENTS.md`/`session*.md`/`.kiro/` excluded via `.gitignore`; team ID email redacted
+- **Docs:** Rewrote `README.md`; updated `DEPENDENCIES.md`; updated `.gitignore`
+- **Library centralization:** Reusable deps in `/Volumes/Mac Stick/Library/kinect-deps` (libfreenect, libfreenect2), symlinked and gitignored
+- **Build:** Verified CMake + macKinect build + CLI smoke tests (`--help`, `--version`, `--list`, `--integration-status`) via `run-test.sh`
+- **Release:** VERSION bumped to 1.1.0; prepared for v1.1 GitHub release
 
 ## 1.0.0 - 2026-04-12
 
-- Finalized the first public release baseline for the native macOS Kinect control center
-- Shipped Kinect v1 and Kinect v2 discovery, preview, capture, and recording in one app
-- Shipped 3D scan bundle export with color, infrared, depth, and point-cloud output
-- Shipped system integration packaging for the CoreAudio HAL, Camera Extension, and DAL fallback
-- Added explicit third-party licensing, dependency, redistribution, and attribution documentation
-- Hardened installer staging and signing flows to use secure temporary directories and verification before privileged install
-- Cleaned first-party repository content to remove machine-specific paths and personal identifiers
-- Preserved the Buy Me a Coffee support link as the only intentional personal link
-- Added local-only agent handoff guidance in `AGENTS.md` and excluded it from git
-- Fixed a current macOS crash path by disabling unsafe Kinect v1 image-control transfers that can crash inside `libusb`
-- Added first-party app icon assets and wired them into the packaged app bundle
-- Documented how to build against shared local `libfreenect` / `libfreenect2` checkouts kept outside the repo
-- Updated the public documentation to clearly describe what works, what still does not work, and where contributors can help
+- First public release: Kinect v1/v2 discovery, preview, capture, recording, and 3D scan export
+- System integration: CoreAudio HAL, Camera Extension, DAL fallback
+- Third-party licensing, dependency, and attribution documentation
+- Installer staging and signing flows with secure temp directories and verification
+- First-party content cleaned of machine-specific paths and personal identifiers
+- App icon integrated into bundle; `Buy Me a Coffee` support link added
+- Build documented against shared local `libfreenect` / `libfreenect2` checkouts
