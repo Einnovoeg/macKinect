@@ -223,7 +223,9 @@ struct ContentView: View {
             // Prominent OBS + Mic in Control tab — always visible, not scrolled away
             if selectedSidebarSection == .control {
                 obsProminentCard
+                    .transaction { $0.animation = nil; $0.disablesAnimations = true }
                 micProminentCard
+                    .transaction { $0.animation = nil; $0.disablesAnimations = true }
             }
 
             ScrollView {
@@ -243,10 +245,19 @@ struct ContentView: View {
                     }
                 }
                 .padding(.vertical, 2)
+                .transaction { $0.animation = nil; $0.disablesAnimations = true }
             }
             .scrollIndicators(.hidden)
+            .transaction { $0.animation = nil; $0.disablesAnimations = true }
         }
         .frame(maxHeight: .infinity, alignment: .top)
+        .transaction { $0.animation = nil; $0.disablesAnimations = true }
+        .animation(nil, value: selectedSidebarSection)
+        .animation(nil, value: manager.audioLevel)
+        .animation(nil, value: manager.status)
+        .animation(nil, value: manager.streaming)
+        .animation(nil, value: manager.connected)
+        .animation(nil, value: manager.trackingStatus)
     }
 
     private var obsProminentCard: some View {
@@ -1176,13 +1187,16 @@ struct ContentView: View {
                     .foregroundStyle(.white.opacity(0.95))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .multilineTextAlignment(.leading)
+                    .transaction { $0.animation = nil }
             }
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .transaction { $0.animation = nil }
         }
         .padding(14)
         .background(panelCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .transaction { $0.animation = nil; $0.disablesAnimations = true }
     }
 
     @ViewBuilder
