@@ -195,7 +195,7 @@ final class KinectManager: ObservableObject {
 
     @Published var tiltAngle = 0
     @Published var ledMode = 1
-    @Published var mirror = true
+    @Published var mirror = false
     @Published var autoExposure = true
     @Published var autoWhiteBalance = true
     @Published var nearMode = false

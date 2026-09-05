@@ -335,11 +335,14 @@ struct ContentView: View {
                         .foregroundStyle(.white.opacity(0.7))
                         .frame(width: 36, alignment: .trailing)
                 }
+                .frame(height: 18)
+                .transaction { $0.animation = nil }
                 Text(manager.directMicrophoneSupportDetail)
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 28, idealHeight: 28, maxHeight: 28, alignment: .leading)
+                    .transaction { $0.animation = nil }
             }
         }
         .transaction { $0.animation = nil }
@@ -514,8 +517,8 @@ struct ContentView: View {
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(2, reservesSpace: true)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 36, idealHeight: 36, maxHeight: 36, alignment: .leading)
+                    .transaction { $0.animation = nil; $0.disablesAnimations = true }
                     .animation(nil, value: manager.status)
 
                 HStack(spacing: 8) {

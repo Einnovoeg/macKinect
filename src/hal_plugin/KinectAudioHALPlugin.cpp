@@ -1301,11 +1301,16 @@ OSStatus STDMETHODCALLTYPE DriverStartIO(AudioServerPlugInDriverRef, AudioObject
     capture_ready = StartKinectMicCapture();
   }
   if (!capture_ready) {
-    gRunningIOClients.fetch_sub(1, std::memory_order_acq_rel);
     if (gLog != nullptr) {
-      os_log_error(gLog, "HAL StartIO failed because Kinect microphone capture is not ready.");
+      os_log_error(gLog, "HAL StartIO: capture not ready, providing silence until Kinect is released from app.");
     }
-    return kAudioHardwareUnspecifiedError;
+    // Keep IO running with silence instead of failing, so System Settings and OBS can select the mic.
+    // When the Kinect is released from the app, the next IO cycle will pick up real audio.
+    if (gLog != nullptr) {
+      os_log_info(gLog, "HAL StartIO clients=%u ready=%{public}s (silence)", static_cast<unsigned>(previous + 1),
+                  capture_ready ? "true" : "false");
+    }
+    return noErr;
   }
   if (gLog != nullptr) {
     os_log_info(gLog, "HAL StartIO clients=%u ready=%{public}s", static_cast<unsigned>(previous + 1),
